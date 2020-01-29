@@ -1335,7 +1335,7 @@ getVPReads <- function(rds,vpRegion) {
   return(peakCDat)
 }
 
-getPeakCPeaks <- function(resPeakC, min.gapwidth) {
+getPeakCPeaks <- function(resPeakC, min.gapwidth=0) {
 
   vpChr <- resPeakC$vpChr
 
@@ -1383,7 +1383,7 @@ exportPeakCPeaks <- function(resPeakC, bedFile, name=NULL, desc=NULL, includeVP=
   }
 }
 
-doPeakC <- function(rdsFiles, vpRegion=2e6, wSize=21, alphaFDR=0.05, qWd=1.5, qWr=1, minDist=15e3, min.gapwidth=0) {
+doPeakC <- function(rdsFiles, vpRegion=2e6, wSize=21, alphaFDR=0.05, qWd=1.5, qWr=1, minDist=15e3) {
   if( !suppressMessages(require( "peakC", character.only=TRUE ) ) ) stop( "Package not found: peakC" )
   if( !suppressMessages(require( "GenomicRanges", character.only=TRUE ) ) ) stop( "Package not found: GenomicRanges" )
 
@@ -1430,7 +1430,7 @@ doPeakC <- function(rdsFiles, vpRegion=2e6, wSize=21, alphaFDR=0.05, qWd=1.5, qW
     resPeakC$vpPos <- vppos
     resPeakC$vpChr <- vpChr
     if(length(resPeakC$peak)>0) {
-      resPeakC$exportPeakGR <- getPeakCPeaks(resPeakC, min.gapwidth=min.gapwidth)
+      resPeakC$exportPeakGR <- getPeakCPeaks(resPeakC)
     } else {
       resPeakC$exportPeakGR <- NULL
     }
