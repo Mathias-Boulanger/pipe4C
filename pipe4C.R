@@ -1,6 +1,6 @@
 VERSION <- '1.00'
 
-get_script_path <- function(path=NULL) {
+get_script_path <- function(path=NULL){
   if( is.null( path ) ){
     cmdArgs = commandArgs(trailingOnly = FALSE)
     needle = "--file="
@@ -73,7 +73,9 @@ option_list = list(
               help="Create tab seperated values file for all samples"),
   make_option(c("-b", "--bins"), action="store_true", default=FALSE,
               help="Corunt reads for binned regions.")
-  
+
+   make_option(c("-i", "--imageR"), action="store_true", default=FALSE, 
+              help="Create R image for all samples.")
 )
 
 helptext<-"Values stored in the configuration file (conf.yml) are used by default."
@@ -166,30 +168,20 @@ if (argsL$tsv){
 if (argsL$bins){
   configOpt$bins<-argsL$bins
 }
-
-
-
-
-
-
-
+if (argsL$imageR){
+  configOpt$rImage<-argsL$imageR
+}
 
 
 #################################################################################################################
 ### PIPELINE ####################################################################################################
 #################################################################################################################
 
-
-embryo()
-
-
-Run.4Cpipeline( 
-  VPinfo.file = argsL$vpFile
-  ,FASTQ.F = argsL$fqFolder
-  ,OUTPUT.F = argsL$outFolder
-  ,configuration=configOpt
-)
-
+Run.4Cpipeline(
+  VPinfo.file = argsL$vpFile, 
+  FASTQ.F = argsL$fqFolder, 
+  OUTPUT.F = argsL$outFolder, 
+  configuration=configOpt)
 
 #################################################################################################################
 ### END #########################################################################################################

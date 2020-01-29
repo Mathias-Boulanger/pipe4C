@@ -1,5 +1,5 @@
 default:
- fragFolder: /data2/repository/genome/fragmap_4C/PK/
+ fragFolder: /homegalio2/boulangerm/4C/Required_files/
  normalizeFactor: 1000000
  qualityCutoff : 0
  trimLength : 0
@@ -10,13 +10,13 @@ default:
  nTop : 2
  mapUnique : FALSE
  nonBlind : FALSE
- wig : FALSE
- cisplot : FALSE
- genomePlot : FALSE
- tsv : FALSE
- bins : FALSE
- mismatchMax : 0
- 
+ wig : TRUE
+ cisplot : TRUE
+ genomePlot : TRUE
+ tsv : TRUE
+ bins : TRUE
+ mismatchMax : 2
+ rImage : TRUE
  enzymes:
   -
     BamHI
@@ -47,12 +47,6 @@ default:
     TCTAGA
  genomes:
   -
-    mm9
-    BSgenome.Mmusculus.UCSC.mm9
-  -
-    mm10
-    BSgenome.Mmusculus.UCSC.mm10
-  -
     hg19
     BSgenome.Hsapiens.UCSC.hg19
   -
@@ -62,23 +56,15 @@ default:
     
  bowtie2:
   -
-    mm9
-    /data2/repository/genome/mm9/Bowtie2Index/
-  -
-    mm10
-    /data2/repository/genome/mm10/Bowtie2Index/
-  -
     hg19    
-    /data2/repository/genome/hg19/Bowtie2Index/
+    /homegalio2/mpl/Tools/anaconda3/bin/indexes/GRCh37p13_primaryAssembly_chrFormat_MB/
   -
     hg38    
-    /data2/repository/genome/hg38/Bowtie2Index/
-
-    
+    /homegalio2/mpl/Tools/anaconda3/bin/indexes/GRCh38p12_primaryAssembly_chrFormat_MB/    
     
  plot:
   maxY: 2500
   plotView: 1000000
   xaxisUnit: 'Mb'
   plotType: 'PDF'
-  binSize: 25000
+  binSize: 10000
