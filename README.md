@@ -75,7 +75,9 @@ Download the latest version of the pipeline from this git repository using:
 | tsv             | Create tab separated value file for all samples                                                                                                                                               |
 | bins            | Count reads for binned regions                                                                                                                                                                |
 | mismatchMax     | The maximum number of mismatches allowed during demultiplexing                                                                                                                                |
-  
+| peakC           | Perform peakC analysis for each experiment                                                                                                                                                    |
+| replicates      | Take into account condition and replicates in the peakC analysis (condition and replicate column are required in Viewpoint file)                                                              |
+
   **Table 1.** Description of parameters that need to be defined in the configuration file.
   
   <BR>
@@ -83,28 +85,33 @@ Download the latest version of the pipeline from this git repository using:
 * Viewpoint file
   * Experiment specific parameters for each 4C-seq experiment are organized in a viewpoint file. Parameters in this file are stored in a tab-delimited format, with each row containing information for a separate experiment: 
   
-| expname    | primer               | firstenzyme | secondenzyme | genome | vpchr | vppos    | analysis | fastq           |
-|------------|----------------------|-------------|--------------|--------|-------|----------|----------|-----------------|
-| mESC_Sox2  | GAGGGTAATTTTAGCCGATC | DpnII       | Csp6I        | mm9    | 3     | 34547661 | all      | index1.fastq.gz |
-| mESC_Mccc1 | TTGCACCCGTCTTCTTGATC | DpnII       | Csp6I        | mm9    | 3     | 35873313 | cis      | index1.fastq.gz |
+| expname             | primer               | firstenzyme | secondenzyme | genome | vpchr | vppos    | analysis | fastq             | condition     | replicate |
+|---------------------|----------------------|-------------|--------------|--------|-------|----------|----------|-------------------|---------------|-----------|
+| mESC_Sox2_wt1       | GAGGGTAATTTTAGCCGATC | DpnII       | Csp6I        | mm9    | 3     | 34547661 | all      | index1.1.fastq.gz | WT            | 1         |
+| mESC_Sox2_wt2       | GAGGGTAATTTTAGCCGATC | DpnII       | Csp6I        | mm9    | 3     | 34547661 | all      | index1.2.fastq.gz | WT            | 2         |
+| mESC_Sox2_treated1  | GAGGGTAATTTTAGCCGATC | DpnII       | Csp6I        | mm9    | 3     | 34547661 | all      | index2.1.fastq.gz | Treated       | 1         |
+| mESC_Sox2_treated2  | GAGGGTAATTTTAGCCGATC | DpnII       | Csp6I        | mm9    | 3     | 34547661 | all      | index2.2.fastq.gz | Treated       | 2         |
+| mESC_Mccc1          | TTGCACCCGTCTTCTTGATC | DpnII       | Csp6I        | mm9    | 3     | 35873313 | cis      | index1.1.fastq.gz | WT            | 1         |
 
-**Table 2.** Example of a viewpoint file in which two experiments are demultiplexed from the same FASTQ file based on their primer sequence.
+**Table 2.** Example of a viewpoint file in which two experiments (Sox2 - Mccc1) are demultiplexed from the same FASTQ file based on their primer sequence. The Sox2 experiment contains 2 conditions including 2 replicates.
 
 <BR>
  
 
-| Name              | Description                                                                                                                                                                                                                                                                                  |
-|-------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| expname           | Unique experiment name                                                                                                                                                                                                                                                                       |
-| primer            | Primer sequence                                                                                                                                                                                                                                                                              |
-| firstenzyme       | First restriction enzyme name (nearest to reading primer)                                                                                                                                                                                                                                    |
-| secondenzyme      | Second restriction enzyme name                                                                                                                                                                                                                                                               |
-| genome            | Reference genome of interest                                                                                                                                                                                                                                                                 |
-| vpchr             | The chromosome that contains the viewpoint (See note 15)                                                                                                                                                                                                                                     |
-| vppos             | Coordinate of viewpoint position. Any bp position within the VP can be used except the RE motifs (see note 15)                                                                                                                                                                               |
-| analysis          | The final output tables will contain all reads (all) or only the reads that have been mapped to the VP chromosome (cis). For most analysis cis is sufficient and the generated output files will be smaller and therefore easier to process on local computers                               |
-| fastq             | Name of the FASTQ file                                                                                                                                                                                                                                                                       |
-| spacer (optional) | Spacer length. Number of nt included as spacer in the primer to enable out of phase sequencing. Default = 0. The spacer sequence will not be used for demultiplexing. If the spacer sequence is used as a barcode include the sequence in the primer sequence and set the spacer length to 0 |
+| Name                 | Description                                                                                                                                                                                                                                                                                  |
+|----------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| expname              | Unique experiment name                                                                                                                                                                                                                                                                       |
+| primer               | Primer sequence                                                                                                                                                                                                                                                                              |
+| firstenzyme          | First restriction enzyme name (nearest to reading primer)                                                                                                                                                                                                                                    |
+| secondenzyme         | Second restriction enzyme name                                                                                                                                                                                                                                                               |
+| genome               | Reference genome of interest                                                                                                                                                                                                                                                                 |
+| vpchr                | The chromosome that contains the viewpoint (See note 15)                                                                                                                                                                                                                                     |
+| vppos                | Coordinate of viewpoint position. Any bp position within the VP can be used except the RE motifs (see note 15)                                                                                                                                                                               |
+| analysis             | The final output tables will contain all reads (all) or only the reads that have been mapped to the VP chromosome (cis). For most analysis cis is sufficient and the generated output files will be smaller and therefore easier to process on local computers                               |
+| fastq                | Name of the FASTQ file                                                                                                                                                                                                                                                                       |
+| spacer (optional)    | Spacer length. Number of nt included as spacer in the primer to enable out of phase sequencing. Default = 0. The spacer sequence will not be used for demultiplexing. If the spacer sequence is used as a barcode include the sequence in the primer sequence and set the spacer length to 0 |
+| condition (optional) | Name of the condition of the experiment {Default = NA}                                                                                                                                                                                                                                       |
+| replicate (optional) | Number of the replicate {Default = 1}                                                                                                                                                                                                                                                       |
 
 **Table 3.** Description of parameters that are required in the viewpoint file for processing a 4C-seq experiment.
 
@@ -147,6 +154,8 @@ will run the pipeline using 8 cores and generates a wig file, a viewpoint plot a
 | genomePlot     | Create genomeplot for all samples (only possible if analysis is “all” in vpFile)                                                           |
 | tsv            | Create tab separated value file for all samples                                                                                            |
 | bins           | Count reads for binned regions                                                                                                             |
+| peakC          | Perform peakC analysis for each experiment                                                                                                 |
+| replicates     | Take into account condition and replicates in the peakC analysis (condition and replicate column are required in Viewpoint file)           |
 
 **Table 4.** Description of parameters that are recognized by the pipe4C.R script. * are required. 
 
@@ -169,8 +178,8 @@ Download the pipeline and example files using the following command.
 
 #### Modify the configuration file (conf.yml) using any plain text editor
 
-*	Change the location in which the fragmented genome will be generated (fragFolder).
-*	Change the location in which the bowtie2 index is stored.
+* Change the location in which the fragmented genome will be generated (fragFolder).
+* Change the location in which the bowtie2 index is stored.
 
 ## Run the pipeline
 
@@ -186,6 +195,7 @@ The report file indicates that the quality of the experiment is good, as:
 * ~80% of the reads map to the viewpoint chromosome (fragMappedCisPercCorr).
 * ~75% of the reads mapping to the viewpoint chromosome maps within 1MB from the viewpoint (cov1Mb).
 * Furthermore ~90% of the mappable DpnII fragment ends within 100kb from the viewpoint (capt100Kb) have at least one read.
+
 
 #### The viewpoint plots
 
@@ -236,5 +246,3 @@ resPeaks <- getPeakCPeaks(resPeakC=resPeakC)
 peaksFile <- "./outF/set_1_viewpoint_10_ESC_peakC_peaks.bed"
 exportPeakCPeaks(resPeakC=resPeakC,bedFile=peaksFile,name="set_1_viewpoint_10_ESC_peakC_peaks")
 ```
-
-

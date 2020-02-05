@@ -5,7 +5,7 @@ default:
  trimLength : 0
  minAmountReads : 1000
  readsQuality : 1
- cores : 1
+ cores : 12
  wSize : 21
  nTop : 2
  mapUnique : FALSE
@@ -16,7 +16,14 @@ default:
  tsv : TRUE
  bins : TRUE
  mismatchMax : 2
- rImage : TRUE
+ chr_random : FALSE
+ chrUn : FALSE
+ chrM : FALSE
+ 
+ replicates : TRUE
+ peakC : TRUE
+
+
  enzymes:
   -
     BamHI
@@ -45,6 +52,7 @@ default:
   -
     XbaI
     TCTAGA
+ 
  genomes:
   -
     hg19
@@ -52,16 +60,15 @@ default:
   -
     hg38
     BSgenome.Hsapiens.UCSC.hg38
-  
-    
+   
  bowtie2:
   -
     hg19    
     /homegalio2/mpl/Tools/anaconda3/bin/indexes/GRCh37p13_primaryAssembly_chrFormat_MB/
   -
     hg38    
-    /homegalio2/mpl/Tools/anaconda3/bin/indexes/GRCh38p12_primaryAssembly_chrFormat_MB/    
-    
+    /homegalio2/mpl/Tools/anaconda3/bin/indexes/GRCh38p12_primaryAssembly_chrFormat_MB/
+     
  plot:
   maxY: 2500
   plotView: 1000000

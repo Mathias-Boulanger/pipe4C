@@ -1,7 +1,7 @@
-VERSION <- '1.00'
+VERSION <- '1.10'
 
-get_script_path <- function(path=NULL){
-  if( is.null( path ) ){
+get_script_path <- function(path=NULL) {
+  if(is.null(path)){
     cmdArgs = commandArgs(trailingOnly = FALSE)
     needle = "--file="
     match = grep(needle, cmdArgs)
@@ -26,7 +26,7 @@ get_script_path <- function(path=NULL){
 #################################################################################################################
 ### PARSING THE INPUT ###########################################################################################
 #################################################################################################################
-if( !suppressMessages(require( "optparse", character.only = TRUE ) ) ) stop( "Package not found: argparse" )
+if(!suppressMessages(require("optparse", character.only = TRUE))) stop("Package not found: optparse")
 
 option_list = list(
   make_option(c("-v", "--vpFile"), type="character", default=NULL, 
@@ -36,13 +36,11 @@ option_list = list(
   make_option(c("-o", "--outFolder"), type="character", default=NULL, 
               help="path to the output folder [required]", metavar="/path/to/output_folder/"),
   make_option(c("-c", "--confFile"), type="character", default="conf.yml", 
-              help="path to configuration file [default %default]", metavar="/path/to/conf.yml/"),
-  
+              help="path to configuration file [default %default]", metavar="/path/to/conf.yml/"),  
   
   
   make_option(c("-d", "--mismatchMax"), type="integer", default=NULL,
-              help="Maximum number of mismatches allowed with primer sequence during demultiplexing.",metavar="number"),
-  
+              help="Maximum number of mismatches allowed with primer sequence during demultiplexing.",metavar="number"),  
   make_option(c("-q", "--qualityCutoff"), type="integer", default=NULL,
               help="Q-score. Trim 3-end of all sequences using a sliding window as soon as 2 of 5 nucleotides has quality encoding less than the Q-score.",metavar="number"),
   make_option(c("-l", "--trimLength"), type="integer", default=NULL,
@@ -56,8 +54,7 @@ option_list = list(
   make_option(c("-s", "--wSize"), type="integer", default=NULL,
               help="The running mean window size.",metavar="number"),
   make_option(c("-n", "--nTop"), type="integer", default=NULL,
-              help="Top fragments discarded for normalization.",metavar="number"),
-  
+              help="Top fragments discarded for normalization.",metavar="number"),  
   
   make_option(c("-u", "--mapUnique"), action="store_true", default=FALSE,
               help="Extract uniquely mapped reads, based on the lack of XS tag."),
@@ -70,12 +67,22 @@ option_list = list(
   make_option(c("-g", "--genomePlot"), action="store_true", default=FALSE,
               help="Create genomeplot for all samples (only possible if analysis is all in vpFile)."),
   make_option(c("-t", "--tsv"), action="store_true", default=FALSE,
-              help="Create tab seperated values file for all samples"),
+              help="Create tab separated values file for all samples"),
   make_option(c("-b", "--bins"), action="store_true", default=FALSE,
-              help="Corunt reads for binned regions.")
+              help="Co-runt reads for binned regions."),
+  make_option(c("-chr", "--chr_random"), action="store_true", default=FALSE,
+              help="chr_random is in bowtie2 index genome."),
+  make_option(c("-chrUn", "--chrUn"), action="store_true", default=FALSE,
+              help="chrUn is in bowtie2 index genome."),
+  make_option(c("-chrM", "--chrM"), action="store_true", default=FALSE,
+              help="chrM is in bowtie2 index genome."),
 
-   make_option(c("-i", "--imageR"), action="store_true", default=FALSE, 
-              help="Create R image for all samples.")
+
+  make_option(c("-pe", "--peakC"), action="store_true", default=FALSE, 
+              help="Perform peakC analysis."),
+  make_option(c("-rep", "--replicates"), action="store_true", default=FALSE, 
+              help="take in count replicates for peakC and output files.")
+
 )
 
 helptext<-"Values stored in the configuration file (conf.yml) are used by default."
@@ -100,24 +107,24 @@ if (is.null(argsL$outFolder)){
 #################################################################################################################
 ### Load packages ###############################################################################################
 #################################################################################################################
-message( '\n------ Loading functions and configuration file' )
+message('\n------ Loading functions and configuration file')
 
-#.libPaths( c( .libPaths(), "/pipeline4C/BSgenomes/installed/") )
+#.libPaths(c(.libPaths(), "/pipeline4C/BSgenomes/installed/"))
 
-if( !suppressMessages(require( "ShortRead", character.only=TRUE ) ) ) stop( "Package not found: ShortRead" )
-if( !suppressMessages(require( "GenomicRanges", character.only=TRUE ) ) ) stop( "Package not found: GenomicRanges" )
-if( !suppressMessages(require( "GenomicAlignments", character.only=TRUE ) ) ) stop( "Package not found: GenomicAlignments" )
-if( !suppressMessages(require( "caTools", character.only=TRUE ) ) ) stop( "Package not found: caTools" )
-if( !suppressMessages(require( "config", character.only=TRUE ) ) ) stop( "Package not found: config" )
+if(!suppressMessages(require("ShortRead", character.only=TRUE))) stop("Package not found: ShortRead")
+if(!suppressMessages(require("GenomicRanges", character.only=TRUE))) stop("Package not found: GenomicRanges")
+if(!suppressMessages(require("GenomicAlignments", character.only=TRUE))) stop("Package not found: GenomicAlignments")
+if(!suppressMessages(require("caTools", character.only=TRUE))) stop("Package not found: caTools")
+if(!suppressMessages(require("config", character.only=TRUE))) stop("Package not found: config")
+if(!suppressMessages(require("peakC", character.only=TRUE))) stop("Package not found: peakC")
 
-
-source( sub( pattern='pipe4C\\.R', replacement='functions\\.R', x=get_script_path()) )
+source(sub(pattern='pipe4C\\.R', replacement='functions\\.R', x=get_script_path()))
 
 if (argsL$confFile=='conf.yml'){
-  argsL$confFile<-sub( pattern='pipe4C\\.R', replacement='conf.yml', x=get_script_path()) 
+  argsL$confFile<-sub(pattern='pipe4C\\.R', replacement='conf.yml', x=get_script_path()) 
 }
 
-configOpt <- createConfig( confFile=argsL$confFile )
+configOpt <- createConfig(confFile=argsL$confFile)
 configOpt$pipeline.version <- VERSION
 
 
@@ -168,8 +175,36 @@ if (argsL$tsv){
 if (argsL$bins){
   configOpt$bins<-argsL$bins
 }
-if (argsL$imageR){
-  configOpt$rImage<-argsL$imageR
+if (argsL$chr_random){
+  configOpt$chr_random<-argsL$chr_random
+}
+if (argsL$chrUn){
+  configOpt$chrUn<-argsL$chrUn
+}
+if (argsL$chrM){
+  configOpt$chrM<-argsL$chrM
+}
+
+if (argsL$peakC){
+  configOpt$peakC<-argsL$peakC
+}
+if (argsL$replicates){
+  configOpt$replicates<-argsL$replicates
+}
+
+#Check whether Bowtie2 and samtools are installed...
+system("bowtie2 --version")
+b <- as.numeric(system("echo $?"))
+# if bowtie2 is not installed b == 127
+if (b != 0){
+  stop("Bowtie2 is not installed!\n", call.=FALSE)
+}
+
+system("samtools --version")
+s <- as.numeric(system("echo $?"))
+# if bowtie2 is not installed b == 127
+if (s != 0){
+  stop("Samtools is not installed!\n", call.=FALSE)
 }
 
 
@@ -177,11 +212,7 @@ if (argsL$imageR){
 ### PIPELINE ####################################################################################################
 #################################################################################################################
 
-Run.4Cpipeline(
-  VPinfo.file = argsL$vpFile, 
-  FASTQ.F = argsL$fqFolder, 
-  OUTPUT.F = argsL$outFolder, 
-  configuration=configOpt)
+Run.4Cpipeline(VPinfo.file = argsL$vpFile, FASTQ.F = argsL$fqFolder, OUTPUT.F = argsL$outFolder, configuration=configOpt)
 
 #################################################################################################################
 ### END #########################################################################################################

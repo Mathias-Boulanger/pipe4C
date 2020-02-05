@@ -1,7 +1,7 @@
 # FUNCTIONS 4C PIPELINE
 
-createConfig <- function( confFile=argsL$confFile ) {
-  configF <- config::get(file=confFile )
+createConfig <- function(confFile=argsL$confFile){
+  configF <- config::get(file=confFile)
   baseFolder <- configF$fragFolder
   normFactor <- configF$normalizeFactor
   plotView <- configF$plot$plotView
@@ -25,24 +25,28 @@ createConfig <- function( confFile=argsL$confFile ) {
   tsv <- configF$tsv
   bins <- configF$bins
   mmMax <- configF$mismatchMax
-  rImage <- configF$rImage
+  peakC <- configF$peakC
+  replicates <- configF$replicates
+  chr_random <- configF$chr_random
+  chrUn <- configF$chrUn
+  chrM <- configF$chrM
+  
+  enzymes <- data.frame(
+    name=as.character(sapply(configF$enzymes, function(x) strsplit(x, split=' ')[[1]][1])),
+    RE.seq=as.character(sapply(configF$enzymes, function(x) strsplit(x, split=' ')[[1]][2])),
+    stringsAsFactors=FALSE, row.names=1)
 
-  enzymes <- data.frame( 
-    name=as.character( sapply( configF$enzymes, function(x) strsplit( x, split=' ' )[[1]][1] ) ),
-    RE.seq=as.character( sapply( configF$enzymes, function(x) strsplit( x, split=' ' )[[1]][2] ) ),
-    stringsAsFactors=FALSE , row.names=1 )
+  genomes <- data.frame(
+    genome=as.character(sapply(configF$genomes, function(x) strsplit(x, split=' ')[[1]][1])),
+    BSgenome=as.character(sapply(configF$genomes, function(x) strsplit(x, split=' ')[[1]][2])),
+    stringsAsFactors=FALSE, row.names=1)
 
-  genomes <- data.frame( 
-    genome=as.character( sapply( configF$genomes, function(x) strsplit( x, split=' ' )[[1]][1] ) ),
-    BSgenome=as.character( sapply( configF$genomes, function(x) strsplit( x, split=' ' )[[1]][2] ) ),
-    stringsAsFactors=FALSE, row.names=1 )
+  bt2Genomes <- data.frame(
+    genome=as.character(sapply(configF$bowtie2, function(x) strsplit(x, split=' ')[[1]][1])),
+    path=as.character(sapply(configF$bowtie2, function(x) strsplit(x, split=' ')[[1]][2])),
+    stringsAsFactors=FALSE, row.names=1)
 
-  bt2Genomes <- data.frame( 
-    genome=as.character( sapply( configF$bowtie2, function(x) strsplit( x, split=' ' )[[1]][1] ) ),
-    path=as.character( sapply( configF$bowtie2, function(x) strsplit( x, split=' ' )[[1]][2] ) ),
-    stringsAsFactors=FALSE, row.names=1 )
-
-  return( list( baseFolder=baseFolder, 
+  return(list(baseFolder=baseFolder, 
     normFactor=normFactor,
     enzymes=enzymes,
     genomes=genomes,
@@ -67,53 +71,99 @@ createConfig <- function( confFile=argsL$confFile ) {
     tsv=tsv,
     bins=bins,
     mmMax=mmMax,
-    rImage=rImage) )
+    chr_random=chr_random,
+    chrUn=chrUn,
+    chrM=chrM,
+    peakC=peakC,
+    replicates=replicates,))
 }
 
-Read.VPinfo <- function(VPinfo.file) {
+Read.VPinfo <- function(VPinfo.file){
   #Indentify Fastq files, experiment names and primer sequence from VPinfo file
-  VPinfo <- read.table(VPinfo.file, sep="\t", stringsAsFactors=FALSE, header=TRUE )
+  VPinfo <- read.table(VPinfo.file, sep="\t", stringsAsFactors=FALSE, header=TRUE)
 
   if (ncol(VPinfo)==9){
-    defaultNames<-c( 'expname', 'primer', 'firstenzyme', 'secondenzyme', 'genome', 'vpchr', 'vppos', 'analysis', 'fastq' )
-    headerCount <- sum( colnames( VPinfo ) %in% defaultNames )
+    defaultNames<-c('expname', 'primer', 'firstenzyme', 'secondenzyme', 'genome', 'vpchr', 'vppos', 'analysis', 'fastq')
+    headerCount <- sum(colnames(VPinfo) %in% defaultNames)
+  }
+
+  if (ncol(VPinfo)==11){
+    defaultNames<-c('expname','primer', 'firstenzyme', 'secondenzyme', 'genome', 'vpchr', 'vppos', 'analysis', 'fastq', 'condition', 'replicate')
+    headerCount <- sum(colnames(VPinfo) %in% defaultNames) 
   }
   
   if (ncol(VPinfo)==10){
-    defaultNames<-c( 'expname', 'spacer','primer', 'firstenzyme', 'secondenzyme', 'genome', 'vpchr', 'vppos', 'analysis', 'fastq' )
-    headerCount <- sum( colnames( VPinfo ) %in% defaultNames ) 
+    defaultNames<-c('expname', 'spacer', 'primer', 'firstenzyme', 'secondenzyme', 'genome', 'vpchr', 'vppos', 'analysis', 'fastq')
+    headerCount <- sum(colnames(VPinfo) %in% defaultNames) 
   }
+
+  if (ncol(VPinfo)==12){
+    defaultNames<-c('expname','spacer', 'primer', 'firstenzyme', 'secondenzyme', 'genome', 'vpchr', 'vppos', 'analysis', 'fastq', 'condition', 'replicate')
+    headerCount <- sum(colnames(VPinfo) %in% defaultNames) 
+  }
+
   
-  if ( headerCount < ncol(VPinfo) ) {
-    message( "Header not correct in VPinfo file." )
+  if (headerCount < ncol(VPinfo)){
+    message("Header not correct in VPinfo file.")
     return()
   }
   
-  expname <- as.character(gsub("[^A-Za-z0-9_]", "", VPinfo$expname ))
-  primer <-   toupper(as.character(gsub("[^A-Za-z]", "", VPinfo$primer )))
-  firstenzyme <-  as.character(gsub("[^A-Za-z0-9]", "", VPinfo$firstenzyme ))
-  secondenzyme <- as.character(gsub("[^A-Za-z0-9]", "", VPinfo$secondenzyme ))
-  genome <- as.character(gsub("[^A-Za-z0-9_]", "", VPinfo$genome ))
-   
-  #vpchr <- as.character(gsub("[^0-9XYMxym]", "",VPinfo$vpchr ))
 
+
+  expname <- as.character(gsub("[^A-Za-z0-9_]", "", VPinfo$expname))
+  primer <-   toupper(as.character(gsub("[^A-Za-z]", "", VPinfo$primer)))
+  firstenzyme <-  as.character(gsub("[^A-Za-z0-9]", "", VPinfo$firstenzyme))
+  secondenzyme <- as.character(gsub("[^A-Za-z0-9]", "", VPinfo$secondenzyme))
+  genome <- as.character(gsub("[^A-Za-z0-9_]", "", VPinfo$genome))
+   
+  #vpchr <- as.character(gsub("[^0-9XYMxym]", "",VPinfo$vpchr))
   #To be sure that any kind of chromosome name for different species can be used I only remove spaces.
-  vpchr <- as.character(gsub(" ", "",VPinfo$vpchr ))
+  vpchr <- as.character(gsub(" ", "",VPinfo$vpchr)) 
   
-  vppos <- as.numeric(gsub("\\D+", "", VPinfo$vppos ))
-  analysis <- as.character(gsub("[^a-z]", "", VPinfo$analysis ))
-  fastq <- as.character( VPinfo$fastq )
-  
-  if (ncol(VPinfo)==9){
-    VPinfo$spacer<-0
+  if(is.numeric(VPinfo$vppos)){
+    vppos <- as.numeric(gsub("\\D+", "", VPinfo$vppos))
+  } else {
+    message("One of the vppos is not numeric.")
+    return()
   }
   
-  spacer <- as.numeric(gsub("\\D+", "", VPinfo$spacer ))
+  analysis <- as.character(gsub("[^a-z]", "", VPinfo$analysis))
+  fastq <- as.character(VPinfo$fastq)
+  
+  if (ncol(VPinfo)==9 | ncol(VPinfo)==11){
+    VPinfo$spacer<-0
+  }
+  if (ncol(VPinfo)==9 | ncol(VPinfo)==10){
+    VPinfo$condition<-NA
+    VPinfo$replicate<-1
+  }
+  spacer <- as.numeric(gsub("\\D+", "", VPinfo$spacer))
+  condition <- as.character(gsub("[^A-Za-z0-9]", "", VPinfo$condition))
 
-  return( data.frame( expname=expname, spacer=spacer, primer=primer, firstenzyme=firstenzyme, secondenzyme=secondenzyme, genome=genome, vpchr=vpchr, vppos=vppos, analysis=analysis, fastq=fastq, stringsAsFactors=FALSE ) )         
+  if(is.numeric(VPinfo$replicate)){
+    replicate <- as.numeric(gsub("\\D+", "", VPinfo$replicate))
+  } else {
+    message("One of the replicate value is not numeric.")
+    return()
+  }
+  
+
+  return(data.frame(expname=expname, 
+    spacer=spacer, 
+    primer=primer, 
+    firstenzyme=firstenzyme, 
+    secondenzyme=secondenzyme, 
+    genome=genome, 
+    vpchr=vpchr, 
+    vppos=vppos, 
+    analysis=analysis, 
+    fastq=fastq,
+    condition=condition,
+    replicate=replicate,
+    stringsAsFactors=FALSE))         
 }
 
-demux.FASTQ <- function(VPinfo, FASTQ.F, FASTQ.demux.F, demux.log.path, overwrite = FALSE, mmMax) {
+demux.FASTQ <- function(VPinfo, FASTQ.F, FASTQ.demux.F, demux.log.path, overwrite = FALSE, mmMax){
   # reading functions
   if (!require("ShortRead", character.only = TRUE)) stop("Package not found: ShortRead")
     
@@ -126,8 +176,8 @@ demux.FASTQ <- function(VPinfo, FASTQ.F, FASTQ.demux.F, demux.log.path, overwrit
     #Demultiplex per FASTQ file
 
     file.fastq <- sort(unique(VPinfo$fastq))
-    for (i in 1:length(file.fastq)) {
-      VPinfo.fastq <- VPinfo[VPinfo$fastq == file.fastq[i], ]
+    for (i in 1:length(file.fastq)){
+      VPinfo.fastq <- VPinfo[VPinfo$fastq == file.fastq[i],]
 
       # Remove weird characters from VPinfo file
       exp.name.all <- as.character(VPinfo$expname)
@@ -139,8 +189,8 @@ demux.FASTQ <- function(VPinfo, FASTQ.F, FASTQ.demux.F, demux.log.path, overwrit
       exp.name.unique <- NULL
       primer.unique <- NULL
       spacer.unique <- NULL
-      for (a in 1:length(exp.name)) {
-        if (exp.name[a] %in% exp.name.all[duplicated(exp.name.all)]) {
+      for (a in 1:length(exp.name)){
+        if (exp.name[a] %in% exp.name.all[duplicated(exp.name.all)]){
           error.msg <- paste("      ### ERROR: Experiment name not unique for ", exp.name[a])
           message(error.msg)
           write(error.msg, demux.log.path, append = TRUE)
@@ -151,10 +201,10 @@ demux.FASTQ <- function(VPinfo, FASTQ.F, FASTQ.demux.F, demux.log.path, overwrit
         }
       }
       fq.df <- data.frame()
-      for (b in 1:length(exp.name.unique)) {
+      for (b in 1:length(exp.name.unique)){
         outfile <- paste0(FASTQ.demux.F, exp.name.unique[b], ".fastq.gz")
-        if (any(file.exists(outfile))) {
-          if (overwrite == TRUE) {
+        if (any(file.exists(outfile))){
+          if (overwrite == TRUE){
             unlink(outfile)
             error.msg <- paste("      ### WARNING: File", outfile, "exists and will be overwritten.")
             write(error.msg, demux.log.path, append = TRUE)
@@ -170,7 +220,7 @@ demux.FASTQ <- function(VPinfo, FASTQ.F, FASTQ.demux.F, demux.log.path, overwrit
         }
       }
       
-      #Check whether primers hae enough distance with maximum allowed mismatches.
+      #Check whether primers has enough distance with maximum allowed mismatches.
       #
       #https://www.rdocumentation.org/packages/DescTools/versions/0.99.19/topics/StrDist
       #The function computes the Hamming and the Levenshtein (edit) distance of two given strings (sequences).
@@ -178,12 +228,12 @@ demux.FASTQ <- function(VPinfo, FASTQ.F, FASTQ.demux.F, demux.log.path, overwrit
       #In case of the Hamming distance the two strings must have the same length.
       #
 
-      if (nrow(fq.df)>1) {
-        message("Check whether primer can be seperated" )
+      if (nrow(fq.df)>1){
+        message("Check whether primer can be seperated")
         primers.mm<-DNAStringSet(fq.df$primer)
         names(primers.mm)<-fq.df$exp.name
 
-        for (c in seq_along(primers.mm)) {
+        for (c in seq_along(primers.mm)){
           primers.mm2<-primers.mm[-c]
           #dist <- srdistance(primers.mm2,primers.mm[c])[[1]]
           dist <- srdistance(primers.mm2,primers.mm[c],method = "Hamming")[[1]]
@@ -203,20 +253,20 @@ demux.FASTQ <- function(VPinfo, FASTQ.F, FASTQ.demux.F, demux.log.path, overwrit
       }
 
       # Read FastQ
-      if (nrow(fq.df) > 0) {
+      if (nrow(fq.df) > 0){
         message(paste("      >>> Reading Fastq: ", file.fastq[i], " <<<"))
-        if (file.exists(paste0(FASTQ.F, "/", file.fastq[i]))) {
+        if (file.exists(paste0(FASTQ.F, "/", file.fastq[i]))){
 
-          # then we stream the fastq files at 1,000,000 reads each time ( default )
+          # then we stream the fastq files at 1,000,000 reads each time (default)
           stream <- FastqStreamer((paste0(FASTQ.F, "/", file.fastq[i])))
           message(paste0("         ### ", fq.df$exp.name, " check for primer sequence ", fq.df$primer, 
             " spacer:", fq.df$spacer, " max mismatch:", mmMax, "\n"))
-          while (length(fq <- yield(stream))) {
-            for (i in 1:nrow(fq.df)) {
+          while (length(fq <- yield(stream))){
+            for (i in 1:nrow(fq.df)){
               primer.seq <- as.character(fq.df$primer[i])
               spacer <- as.numeric(fq.df$spacer[i])
-              if (mmMax == 0) {
-                demultiplex.primer = srFilter(function(x) {
+              if (mmMax == 0){
+                demultiplex.primer = srFilter(function(x){
                   substr(sread(x), spacer + 1, spacer + nchar(primer.seq)) == primer.seq
                   }, name = "demultiplex.primer")
                 demux.fq <- fq[demultiplex.primer(fq)]
@@ -238,161 +288,143 @@ demux.FASTQ <- function(VPinfo, FASTQ.F, FASTQ.demux.F, demux.log.path, overwrit
     }
 }
 
-
-trim.FASTQ <- function( exp.name, firstcutter, secondcutter, file.fastq, trim.F, cutoff, trim.length, log.path, min.amount.reads){
-  txt.tmp <- paste0( trim.F, exp.name, ".txt" )
-  info.file <- paste0( trim.F, exp.name, ".info.rds" )
-  if ( file.exists( txt.tmp ) & file.exists( info.file ) ) {
-    error.msg <- paste0( "         ### WARNING: trimmed file", exp.name, "already exists, continuing with exisiting file." )
-    write( error.msg, log.path, append=TRUE )
-    message( error.msg )
-    return( readRDS(info.file) ) 
-    } else {
-      message( paste( "         ### Reading Fastq: ", file.fastq ))
-      demux.fq <- readFastq( file.fastq )
-  # Qualtity trimming::remove? -- lets test it
-  if ( cutoff > 0 ) {
-    # Trim ends with qualtiy score < cutoff
-    #trimTailw remove low-quality reads from the right end using a sliding window
-    #trim as soon as 2 of 5 nucleotides has quality encoding less than phred score.
-    Phred.cutoff <- rawToChar(as.raw(cutoff + 33))
-    demux.fq <- trimTailw( demux.fq, 2, Phred.cutoff, 2)
-    # Alternatively use trimTails
-    # remove a tally of (successive) nucleotides falling at or below a quality threshold (trimTails).
-    # fq.trimTails.10 <- trimTails(fq, k=2, a=Phred.cutoff, successive=FALSE)
-    # successive: indicating whether failures can occur anywhere in the sequence, or must be successive
-    #Mean average base quality score>cutoff
-    #Does this make sense after end trimming? Should the cutoff be higher?
-    demux.fq <- demux.fq[(alphabetScore(demux.fq) / width(demux.fq)) > cutoff]
-    #Drop reads that are less than 30nt after quality filtering. Discuss lenght with Geert/Valerio
-    demux.fq <- demux.fq[width(demux.fq) >= 30]
-    #Maybe do this filtering afterwards? read len=Cap length?? (or a few nt less?)
-  } #close cutoff
-
-  #Trim sequences 
-  #read.length <- as.numeric(names(which.max(table(width(demux.fq)))))
-
-  sequences <- sread( demux.fq )
-  nReads <- length( sequences )
-
-  if ( nReads < min.amount.reads) {
-    error.msg <- paste0( "         ### ERROR: ",exp.name," - Less reads in FASTQ than set as minimum. Reads: ", nReads )
-    write( error.msg, log.path, append=TRUE )
-    message( error.msg )
-    message("         ### To continue alter minAmountRead argument")
-    return()
+trim.FASTQ <- function(exp.name, firstcutter, secondcutter, file.fastq, trim.F, cutoff, trim.length=0, log.path, min.amount.reads=1000){
+  txt.tmp <- paste0(trim.F, exp.name, ".txt")
+  info.file <- paste0(trim.F, exp.name, ".info.rds")
+  if (file.exists(txt.tmp) & file.exists(info.file)){
+    error.msg <- paste0("         ### WARNING: trimmed file", exp.name, "already exists, continuing with exisiting file.")
+    write(error.msg, log.path, append=TRUE)
+    message(error.msg)
+    return(readRDS(info.file)) 
   } else {
-    message( paste0( "         ### Total Reads: ", nReads ) )
-  }
-  read.length.table <- sort(table(width(demux.fq)), decreasing=TRUE)[1]
-  read.length<-as.numeric(names(read.length.table))
-  read.length.perc<-round(as.numeric(read.length.table/nReads*100),2)
+    message(paste("         ### Reading Fastq: ", file.fastq))
+    demux.fq <- readFastq(file.fastq)
+    # Qualtity trimming::remove? -- lets test it
+    if (cutoff > 0){
+      # Trim ends with qualtiy score < cutoff
+      # trimTailw remove low-quality reads from the right end using a sliding window
+      # trim as soon as 2 of 5 nucleotides has quality encoding less than phred score.
+      Phred.cutoff <- rawToChar(as.raw(cutoff + 33))
+      demux.fq <- trimTailw(demux.fq, 2, Phred.cutoff, 2)
+      # Alternatively use trimTails
+      # remove a tally of (successive) nucleotides falling at or below a quality threshold (trimTails).
+      # fq.trimTails.10 <- trimTails(fq, k=2, a=Phred.cutoff, successive=FALSE)
+      # successive: indicating whether failures can occur anywhere in the sequence, or must be successive
+      #Mean average base quality score>cutoff
+      #Does this make sense after end trimming? Should the cutoff be higher?
+      demux.fq <- demux.fq[(alphabetScore(demux.fq) / width(demux.fq)) > cutoff]
+      #Drop reads that are less than 30nt after quality filtering. Discuss lenght with Geert/Valerio
+      demux.fq <- demux.fq[width(demux.fq) >= 30]
+      #Maybe do this filtering afterwards? read len=Cap length?? (or a few nt less?)
+    } #close cutoff
 
-  if ( read.length.perc < 60) {
-    error.msg <- paste0( "         ### WARNING:", exp.name," - Max read length in only ", read.length.perc, "% of the reads." )
-    write( error.msg, log.path, append=TRUE )
-    message( error.msg )
-  }
+    sequences <- sread(demux.fq)
+    nReads <- length(sequences)
 
-  #Find the most occuring position of the firstcutter
-  #motif.1st.pos <- as.numeric( names( sort( table( regexpr( firstcutter, sequences ) ), decreasing=TRUE ) )[1] )
-
-  motifPos<-sort( table( regexpr( firstcutter, sequences ) ), decreasing=TRUE)[1]
-  motif.1st.pos<-as.numeric( names(motifPos))
-  motifPos.perc<-round(as.numeric(motifPos/nReads*100),2)
-
-  motif.1st.pos.2nd <- FALSE
-  if ( motif.1st.pos > 0 ){
-    #Check whether firstcutter motif is within the first 4 nts (as part of a barcode). If so take 2nd firstcutter pos.
-    if ( motif.1st.pos < 5 ){
-      motif.1st.pos.2nd <- TRUE
-      #motif.1st.pos <- as.numeric( names( sort( table( gregexpr( firstcutter, sequences )[[1]][2] ), decreasing=TRUE ) )[1] )
-      motifPos<-sort( table( gregexpr( firstcutter, sequences )[[1]][2] ), decreasing=TRUE )[1]
-      motif.1st.pos<-as.numeric( names(motifPos))
-      motifPos.perc<-round(as.numeric(motifPos/nReads*100),2)
+    if (nReads < min.amount.reads){
+      error.msg <- paste0("         ### ERROR: ",exp.name," - Less reads in FASTQ than set as minimum. Reads: ", nReads)
+      write(error.msg, log.path, append=TRUE)
+      message(error.msg)
+      message("         ### To continue alter minAmountRead argument")
+      return()
+    } else {
+      message(paste0("         ### Total Reads: ", nReads))
     }
 
-    if ( motifPos.perc < 90) {
-      error.msg <- paste0( "         ### WARNING: ", exp.name, " - Most occuring position RE1 found in only", motifPos.perc, "% of the reads." )
-      write( error.msg, log.path, append=TRUE )
-      message( error.msg )
-    }
-
-    if ( trim.length > 0 ){
+    if (trim.length > 0){
       sequences <- substr( sequences, 1, ( trim.length-1+motif.1st.pos ) )
-      #read.length <- as.numeric(names(which.max(table(width(sequences)))))
+      read.length.table <- sort(table(width(sequences)), decreasing=TRUE)[1]
+    } else {
       read.length.table <- sort(table(width(demux.fq)), decreasing=TRUE)[1]
-      read.length<-as.numeric(names(read.length.table))
-      read.length.perc<-round(as.numeric(read.length.table/nReads*100),2)
     }
 
+    read.length<-as.numeric(names(read.length.table))
+    read.length.perc<-round(as.numeric(read.length.table/nReads*100),2)
 
-    # Trim non-blind fragend sequences based on 2nd cutter 
-    motif.2ndRE.pos <- as.numeric( names( sort( table( regexpr( secondcutter, sequences ) ), decreasing=TRUE ) )[1] ) #Determine whether part of barcode
-    if ( motif.2ndRE.pos > 5 | motif.2ndRE.pos == -1 ){
-      sequences.no.2nd.enzyme <- sub( paste0( secondcutter, ".*$" ), secondcutter, sequences ) # Changes only the 1st pattern match per string
-    } else { #part of bardcode. use the 2nd motif
-      sequences.no.2nd.enzyme <- sub( paste0( "(", secondcutter, ".*?)", secondcutter, ".*$" ), paste0( "\\1", secondcutter ), sequences )
+    if (read.length.perc < 60){
+      error.msg <- paste0("         ### WARNING:", exp.name," - Max read length in only ", read.length.perc, "% of the reads.")
+      write(error.msg, log.path, append=TRUE)
+      message(error.msg)
     }
-    # The . matches any character. .* matches zero or more instances of any character. 
-    # But the matching is greedy; it would match as much as possible. I want matching that is not greedy (only up until the second .) 
-    # so I added ? to suppress the greedy match and .*? matches any group of characters up until we hit the next thing in the regex.
-    # Because the first part was enclosed in parentheses (\\..*?) it is stored as \1,
-    # so the substitution pattern \\1 restores everything before the second . and the second . is replaced with the secondcutter.
-    # Trim 2nd first cutter motif ( Trim blind fragments )
-    if ( motif.1st.pos.2nd == FALSE ){
-      sequences.no.2nd.enzyme <-sub( paste0( "(", firstcutter, ".*?)", firstcutter, ".*$" ), paste0( "\\1", firstcutter ), sequences.no.2nd.enzyme )  
-    }else{
-    # Trim 3rd first cutter motif (Trim blind fragments) if present in barcode
-    sequences.no.2nd.enzyme <-sub( paste0( "(", firstcutter, ".*?", firstcutter, ".*?)", firstcutter, ".*$"), paste0( "\\1", firstcutter ), sequences.no.2nd.enzyme )
-    }
-    # Trim sequences based on 1st cutter
-    keep <- substr( sequences.no.2nd.enzyme, motif.1st.pos, nchar( sequences.no.2nd.enzyme ) )
-  } # close if (motif.1st.pos>0)
 
-  if( motif.1st.pos == -1 ){
-    rm( sequences, demux.fq )
-    error.msg <- paste( "         ### ERROR:", exp.name, "1st RE motif not found in reads" )
-    write( error.msg, log.path, append=TRUE )
-    message( error.msg )
-    return()
-  }
-  write( keep, txt.tmp )
-  rm( sequences, demux.fq )
-  captureLen <- read.length - motif.1st.pos + 1
-  saveRDS( list( captureLen=captureLen, nReads=nReads, motifPosperc=motifPos.perc, readlenperc=read.length.perc  ), file=info.file )
-  return( list( captureLen=captureLen, nReads=nReads, motifPosperc=motifPos.perc, readlenperc=read.length.perc ) )
+    #Find the most occuring position of the firstcutter
+    motifPos<-sort(table(regexpr(firstcutter, sequences)), decreasing=TRUE)[1]
+    motif.1st.pos<-as.numeric(names(motifPos))
+    motifPos.perc<-round(as.numeric(motifPos/nReads*100),2)
+
+    motif.1st.pos.2nd <- FALSE
+    if (motif.1st.pos > 0){
+      #Check whether firstcutter motif is within the first 4 nts (as part of a barcode). If so take 2nd firstcutter pos.
+      if (motif.1st.pos < 5){
+        motif.1st.pos.2nd <- TRUE
+        #motif.1st.pos <- as.numeric(names(sort(table(gregexpr(firstcutter, sequences)[[1]][2]), decreasing=TRUE))[1])
+        
+        motifPos<-sort(table(gregexpr(firstcutter, sequences)[[1]][2]), decreasing=TRUE)[1]
+        motif.1st.pos<-as.numeric(names(motifPos))
+        motifPos.perc<-round(as.numeric(motifPos/nReads*100),2)
+      }
+
+      if (motifPos.perc < 90){
+        error.msg <- paste0("         ### WARNING: ", exp.name, " - Most occuring position RE1 found in only", motifPos.perc, "% of the reads.")
+        write(error.msg, log.path, append=TRUE)
+        message(error.msg)
+      }
+
+      # Trim non-blind fragend sequences based on 2nd cutter 
+      motif.2ndRE.pos <- as.numeric(names(sort(table(regexpr(secondcutter, sequences)), decreasing=TRUE))[1]) #Determine whether part of barcode
+      if (motif.2ndRE.pos > 5 | motif.2ndRE.pos == -1){
+        sequences.no.2nd.enzyme <- sub(paste0(secondcutter, ".*$"), secondcutter, sequences) # Changes only the 1st pattern match per string
+      } else { #part of bardcode. use the 2nd motif
+        sequences.no.2nd.enzyme <- sub(paste0("(", secondcutter, ".*?)", secondcutter, ".*$"), paste0("\\1", secondcutter), sequences)
+      }
+      # The . matches any character. .* matches zero or more instances of any character. 
+      # But the matching is greedy; it would match as much as possible. I want matching that is not greedy (only up until the second .) 
+      # so I added ? to suppress the greedy match and .*? matches any group of characters up until we hit the next thing in the regex.
+      # Because the first part was enclosed in parentheses (\\..*?) it is stored as \1,
+      # so the substitution pattern \\1 restores everything before the second . and the second . is replaced with the secondcutter.
+      # Trim 2nd first cutter motif (Trim blind fragments)
+      if (motif.1st.pos.2nd == FALSE){
+        sequences.no.2nd.enzyme <-sub(paste0("(", firstcutter, ".*?)", firstcutter, ".*$"), paste0("\\1", firstcutter), sequences.no.2nd.enzyme)  
+      }else{
+      # Trim 3rd first cutter motif (Trim blind fragments) if present in barcode
+      sequences.no.2nd.enzyme <-sub(paste0("(", firstcutter, ".*?", firstcutter, ".*?)", firstcutter, ".*$"), paste0("\\1", firstcutter), sequences.no.2nd.enzyme)
+      }
+      # Trim sequences based on 1st cutter
+      keep <- substr(sequences.no.2nd.enzyme, motif.1st.pos, nchar(sequences.no.2nd.enzyme))
+    } # close if (motif.1st.pos>0)
+
+    if(motif.1st.pos == -1){
+      rm(sequences, demux.fq)
+      error.msg <- paste("         ### ERROR:", exp.name, "1st RE motif not found in reads")
+      write(error.msg, log.path, append=TRUE)
+      message(error.msg)
+      return()
+    }
+    write(keep, txt.tmp)
+    rm(sequences, demux.fq)
+    captureLen <- read.length - motif.1st.pos + 1
+    saveRDS(list(captureLen=captureLen, nReads=nReads, motifPosperc=motifPos.perc, readlenperc=read.length.perc ), file=info.file)
+    return(list(captureLen=captureLen, nReads=nReads, motifPosperc=motifPos.perc, readlenperc=read.length.perc))
   }
 }
 
 #Only unique, use grep and samtools or use R for this?
-makeBAM <- function( exp.name, BAM.F, NCORES, Bowtie2Folder, genome, txt.tmp, log.path, bowtie.log.path, bamFile, map.unique, readsQual ) {
-  TEMPfile <- tempfile( pattern = "aln.", tmpdir = tempdir(), fileext = "" )
+makeBAM <- function(exp.name, BAM.F, NCORES, Bowtie2Folder, genome, txt.tmp, log.path, bowtie.log.path, bamFile, map.unique, readsQual=1){
+  TEMPfile <- tempfile(pattern = "aln.", tmpdir = tempdir(), fileext = "")
   check.trunc <- 1
-  while ( check.trunc < 10 ) {
-    message( paste0( "         ### attempt ", check.trunc ) )
-    if ( map.unique == TRUE ) {
-      bamFile.tmp <- paste0( BAM.F, exp.name, "_tmp.bam" )
-      CMD <- paste0(
-        "(bowtie2 -p ",
-        NCORES,
-        " -r -x ",
-        Bowtie2Folder,
-        genome,
-        " -U ",
-        txt.tmp,
-        " | samtools view -hbSu - | samtools sort -T ", TEMPfile, " -o ",
-        bamFile.tmp, ") 2>&1"
-        )
-      bowtie.output <- system(
-        command=CMD
-        , intern=TRUE
-        )
-      for( i in bowtie.output ){ message( paste0( '          ', i) ) }
+  while (check.trunc < 10){
+    message(paste0("         ### attempt ", check.trunc))
+    if (map.unique == TRUE){
+      bamFile.tmp <- paste0(BAM.F, exp.name, "_tmp.bam")
+      CMD <- paste0("(bowtie2 -p ", NCORES, " -r -x ", Bowtie2Folder, genome, " -U ", txt.tmp, 
+        " | samtools view -hbSu - | samtools sort -T ", TEMPfile, " -o ", bamFile.tmp, ") 2>&1")
+      bowtie.output <- system(command=CMD, intern=TRUE)
+
+      for(i in bowtie.output){ message(paste0('          ', i)) }
       write(paste("Bowtie2 output:",exp.name), bowtie.log.path, append=TRUE) 
       write(bowtie.output, bowtie.log.path, append=TRUE)    
       #Check whether BAM in truncated (Due to pipe problems?). If truncated try 5 times.
-      if (length(grep("truncated file", bowtie.output)) == 1) {
+      if (length(grep("truncated file", bowtie.output)) == 1){
         error.msg <- paste("         ### ERROR: ",exp.name," - Truncated BAM file. Repeating Bowtie mapping...")
         message(error.msg)
         write(error.msg, log.path, append=TRUE)
@@ -400,24 +432,25 @@ makeBAM <- function( exp.name, BAM.F, NCORES, Bowtie2Folder, genome, txt.tmp, lo
         unlink(bamFile.tmp)
       } else {
         check.trunc <- 10
-        system( paste0( "samtools view -H ", bamFile.tmp, " > header.sam" )) #Output the header only
-        system( paste0( "samtools view -F 4 ",bamFile.tmp, " | grep -v \"XS:\" | cat header.sam - | samtools view -b - > ", bamFile ))
+        system(paste0("samtools view -H ", bamFile.tmp, " > header.sam")) #Output the header only
+        system(paste0("samtools view -F 4 ",bamFile.tmp, " | grep -v \"XS:\" | cat header.sam - | samtools view -b - > ", bamFile ))
         system( paste0( "samtools index ",  bamFile ))
         unlink(bamFile.tmp)
       }
     } else{
       # map with quality, default 1
-      CMD <- paste0( "(bowtie2 -p ", NCORES, " -r -x ", Bowtie2Folder, genome, " -U ", txt.tmp, 
-        " | samtools view -q ", readsQual, " -bSu - | samtools sort -T ", TEMPfile, " -o ", bamFile, ") 2>&1" )
-      bowtie.output <- system( command=CMD, intern=TRUE )
-      system( paste0( "samtools index ", bamFile ))
-      for( i in bowtie.output ){ 
-        message( paste0( '          ', i) ) 
+      CMD <- paste0("(bowtie2 -p ", NCORES, " -r -x ", Bowtie2Folder, genome, " -U ", txt.tmp, 
+        " | samtools view -q ", readsQual, " -bSu - | samtools sort -T ", TEMPfile, " -o ", bamFile, ") 2>&1")
+      bowtie.output <- system(command=CMD, intern=TRUE)
+      system( paste0("samtools index ", bamFile))
+
+      for(i in bowtie.output){ 
+        message(paste0('          ', i)) 
       }
       write(paste("Bowtie2 output:",exp.name), bowtie.log.path, append=TRUE)
       write(bowtie.output, bowtie.log.path, append=TRUE)
       #Check whether BAM in truncated. If truncated try 10 times.
-      if (length(grep("truncated file", bowtie.output)) == 1) {
+      if (length(grep("truncated file", bowtie.output)) == 1){
         error.msg <-paste0("         ### ERROR: ",exp.name," - Truncated BAM file. Repeating Bowtie mapping...")
         message(error.msg)
         write(error.msg, log.path, append=TRUE)
@@ -428,38 +461,38 @@ makeBAM <- function( exp.name, BAM.F, NCORES, Bowtie2Folder, genome, txt.tmp, lo
       }
     }
   }
-  unlink( TEMPfile )
+  unlink(TEMPfile)
 }
 
-norm4C <- function( readsGR, nReads, nTop, wSize ) {
+norm4C <- function(readsGR, nReads=1e6, nTop=2, wSize=21){
   readsGR$normReads <- 0
-  sumTop <- sum( -sort( -readsGR$reads )[ 1:nTop ] )
-  wNorm <- nReads/( sum( readsGR$reads )-sumTop )
+  sumTop <- sum(-sort(-readsGR$reads)[1:nTop])
+  wNorm <- nReads/(sum(readsGR$reads)-sumTop)
   readsGR$normReads <- wNorm*readsGR$reads
-  readsGR$norm4C <- runmean( x=readsGR$normReads, k=wSize, endrule="mean" )
-  return( readsGR )
+  readsGR$norm4C <- runmean(x=readsGR$normReads, k=wSize, endrule="mean")
+  return(readsGR)
 }
 
-exportWig <- function( gR, expName, filename, vpPos, vpChr, plotView) {
-  gzname<- paste0( filename, ".gz" )
-  gz1 <- gzfile( gzname, "w" )
-  browserPos <- paste0( vpChr,":", vpPos-plotView, "-", vpPos+plotView )
-  positionLine <- paste0( "browser position ", browserPos, "\n" )
-  cat( positionLine, file=gz1 )
-  trackLine <- paste0( "track type=wiggle_0 name=", expName, " visibility=full autoScale=off  viewLimits=0.0:2500.0 maxHeightPixels=50:50:8 color=0,0,200  priority=10\n" )
-  cat(trackLine, file=gz1, append=TRUE )
-  chrs <- as.vector( unique( seqnames( gR ) ) )
-  for( chr in chrs ) {
-    chrLine <- paste0( "variableStep chrom=", chr, " span=100\n" )
-    cat( chrLine, file=gz1, append=TRUE )
+exportWig <- function(gR, expName, filename, vpPos, vpChr, plotView){
+  gzname<- paste0(filename, ".gz")
+  gz1 <- gzfile(gzname, "w")
+  browserPos <- paste0(vpChr,":", vpPos-plotView, "-", vpPos+plotView)
+  positionLine <- paste0("browser position ", browserPos, "\n")
+  cat(positionLine, file=gz1)
+  trackLine <- paste0("track type=wiggle_0 name=", expName, " visibility=full autoScale=off  viewLimits=0.0:2500.0 maxHeightPixels=50:50:8 color=0,0,200  priority=10\n")
+  cat(trackLine, file=gz1, append=TRUE)
+  chrs <- as.vector(unique(seqnames(gR)))
+  for(chr in chrs){
+    chrLine <- paste0("variableStep chrom=", chr, " span=100\n")
+    cat(chrLine, file=gz1, append=TRUE)
     chrGr <- gR[seqnames(gR)==chr]
-    datChr <- data.frame( start=chrGr$pos, score=round(chrGr$norm4C, digits=5 ) )
-    write.table( datChr, file=gz1, append=TRUE, sep="\t", quote=FALSE, row.names=FALSE, col.names=FALSE )
+    datChr <- data.frame(start=chrGr$pos, score=round(chrGr$norm4C, digits=5))
+    write.table(datChr, file=gz1, append=TRUE, sep="\t", quote=FALSE, row.names=FALSE, col.names=FALSE)
   }
   close(gz1)
 }
 
-olRanges <- function(query, subject) {
+olRanges <- function(query, subject){
   ## Find overlapping ranges
   olindex <- as.matrix(findOverlaps(query, subject))
   query <- query[olindex[,1]]
@@ -506,52 +539,62 @@ olRanges <- function(query, subject) {
   oldf <- data.frame(Qindex=olindex[,1], Sindex=olindex[,2], olma, OLstart, OLend, OLlength, OLpercQ, OLpercS, OLtype)
   elementMetadata(query) <- cbind(as.data.frame(elementMetadata(query)), oldf[,-c(3,4)])
   return(query)
- 
 }
 
-alignToFragends <- function( gAlign, fragments, firstcut ) {
-  strand( fragments ) <- ifelse( fragments$fe_strand==3, "-", "+" )
-  ovl <- olRanges( query=fragments, subject=as( gAlign, "GRanges" ) )
+alignToFragends <- function(gAlign, fragments, firstcut){
+  strand(fragments) <- ifelse(fragments$fe_strand==3, "-", "+")
+  ovl <- olRanges(query=fragments, subject=as(gAlign, "GRanges"))
   #remove sequences that overlap only with RE motif
-  ovl <- ovl[ ovl$OLlength >= nchar( as.character( firstcut ) )+1 ]
+  ovl <- ovl[ovl$OLlength >= nchar(as.character(firstcut))+1]
   #Sequence need to start within unique fragment
-  ovl <- ovl[ strand( ovl )=="+" & ovl$Sstart >= start( ovl ) | strand( ovl )=="-" & ovl$Send <= end( ovl ) ]
+  ovl <- ovl[strand(ovl)=="+" & ovl$Sstart >= start(ovl) | strand(ovl)=="-" & ovl$Send <= end(ovl)]
 
   #To do: Make it more strict. Reads should start directly at a restriction enzyme cutting site. 
-  #ovl <- ovl[ strand( ovl )=="+" & ovl$Sstart >= start( ovl ) & ovl$Sstart <= start( ovl )+nchar(as.character(firstcut))| strand( ovl )=="-" & ovl$Send <= end( ovl ) & & ovl$Send >= start( ovl )-nchar(as.character(firstcut)) ]
+  #ovl <- ovl[strand(ovl)=="+" & ovl$Sstart >= start(ovl) & ovl$Sstart <= start(ovl)+nchar(as.character(firstcut))| strand(ovl)=="-" & ovl$Send <= end(ovl) & & ovl$Send >= start(ovl)-nchar(as.character(firstcut))]
   
-  nReads <- tapply( ovl$Sindex, ovl$Qindex, length )
+  nReads <- tapply(ovl$Sindex, ovl$Qindex, length)
   fragments$reads <- 0
-  fragments$reads[ as.numeric( names( nReads ) ) ] <- nReads
-  return( fragments )
+  fragments$reads[as.numeric(names(nReads))] <- nReads
+  return(fragments)
 }
 
-Digest <- function( assemblyName, firstcutter_Digest, secondcutter_Digest, baseFolder_Digest, config_genomes ) {
-  firstcutter <- as.character( firstcutter_Digest )
-  secondcutter <- as.character( secondcutter_Digest )
+Digest <- function(assemblyName, firstcutter_Digest, secondcutter_Digest, baseFolder_Digest, config_genomes, chr_random, chrUn, chrM){
+  firstcutter <- as.character(firstcutter_Digest)
+  secondcutter <- as.character(secondcutter_Digest)
 
-  rdsFile <- paste0( baseFolder_Digest, assemblyName, "_", firstcutter, "_", secondcutter, ".rds" )
+  rdsFile <- paste0(baseFolder_Digest, assemblyName, "_", firstcutter, "_", secondcutter, ".rds")
 
-  if ( !file.exists( rdsFile ) ){
-    do.call( require, args=list( config_genomes[ assemblyName, ] ) )
-    assign( 'frag.genome', base::get( config_genomes[ assemblyName, ] ) )
+  if (!file.exists(rdsFile)){
+    do.call(require, args=list(config_genomes[assemblyName,]))
+    assign('frag.genome', base::get(config_genomes[assemblyName,]))
 
-    chr <- unique( seqnames( frag.genome ) )
-    chr <- chr[ grep( pattern="_random", x=chr, invert=TRUE ) ]
-    chr <- chr[ grep( pattern="_hap", x=chr, invert=TRUE ) ]
-    chr <- chr[ grep( pattern="chrUn_", x=chr, invert=TRUE ) ]
-    chr <- chr[ grep( pattern="chrM", x=chr, invert=TRUE ) ]
+    chr <- unique(seqnames(frag.genome))
+
+    #The "hap" ones are alternate assemblies for certain regions.DO NOT USE THE *hap* files !!!!
+    chr <- chr[grep(pattern="_hap", x=chr, invert=TRUE)]
+    chr <- chr[grep(pattern="_alt", x=chr, invert=TRUE)]
+
+    #Make sure Bowtie2 index does not contain these chr
+    if (chr_random==FALSE){
+      chr <- chr[grep(pattern="_random", x=chr, invert=TRUE)]
+    }
+    if (chrUn==FALSE){
+      chr <- chr[grep(pattern="chrUn_", x=chr, invert=TRUE)]
+    }
+    if (chrM==FALSE){
+      chr <- chr[grep(pattern="chrM", x=chr, invert=TRUE)]
+    }
 
     outFrags <- GRanges()
-    for ( i in seq_along( chr ) ){
-      chrom <- chr[ i ]
-      print( paste( "Processing ", chrom, sep="" ) )
+    for (i in seq_along(chr)){
+      chrom <- chr[i]
+      print(paste("Processing ", chrom, sep=""))
 
-      RE1 <- GRanges( seqnames=chrom, ranges( matchPattern( pattern=firstcutter, subject=frag.genome[[chrom]] ) ) )
-      RE2 <- GRanges( seqnames=chrom, ranges( matchPattern( pattern=secondcutter, subject=frag.genome[[chrom]] ) ) )
+      RE1 <- GRanges(seqnames=chrom, ranges(matchPattern(pattern=firstcutter, subject=frag.genome[[chrom]])))
+      RE2 <- GRanges(seqnames=chrom, ranges(matchPattern(pattern=secondcutter, subject=frag.genome[[chrom]])))
 
-      frag.RE1 <- RE1[ 1:( length(RE1)-1 ) ]
-      end( frag.RE1 )[ 1:( length(RE1)-1 ) ] <- end( RE1 )[ 2:length( RE1 ) ]
+      frag.RE1 <- RE1[1:(length(RE1)-1)]
+      end(frag.RE1)[1:(length(RE1)-1)] <- end(RE1)[2:length(RE1)]
 
       #Only keep RE2 sites that completely overlap with RE1 fragment
       RE2.ol <- olRanges(frag.RE1, RE2)
@@ -565,18 +608,18 @@ Digest <- function( assemblyName, firstcutter_Digest, secondcutter_Digest, baseF
       nonBlinds$type <- "non_blind"
       nonBlinds.fe5 <- nonBlinds
 
-      end( nonBlinds.fe5 ) <- end( RE2.ol[ findOverlaps( nonBlinds, RE2.ol, select="first" ) ] )
+      end(nonBlinds.fe5) <- end(RE2.ol[findOverlaps(nonBlinds, RE2.ol, select="first")])
       nonBlinds.fe5$fe_strand <- 5
       nonBlinds.fe3 <- nonBlinds
-      start( nonBlinds.fe3 ) <- start( RE2.ol[ findOverlaps( nonBlinds, RE2.ol, select="last" ) ] )
+      start(nonBlinds.fe3) <- start(RE2.ol[findOverlaps(nonBlinds, RE2.ol, select="last")])
       nonBlinds.fe3$fe_strand <- 3
 
       nonBlinds.fe5.start <- GRanges()
       nonBlinds.fe3.end <- GRanges()
 
       #Add first and last fragends
-      if ( start( head( RE1, 1 ) ) > start( head( RE2, 1 ) ) ){
-        frag <- GRanges( seqnames=chrom, IRanges( 1, end(RE1[1]) ) )
+      if (start(head(RE1, 1)) > start(head(RE2, 1))){
+        frag <- GRanges(seqnames=chrom, IRanges(1, end(RE1[1])))
         RE2.ol.start <- olRanges(frag, RE2)
         RE2.ol.start <- RE2[RE2.ol.start[RE2.ol.start$OLpercS==100]$Sindex]
         nonBlinds.fe5.start <- RE1[1]
@@ -585,8 +628,8 @@ Digest <- function( assemblyName, firstcutter_Digest, secondcutter_Digest, baseF
         nonBlinds.fe5.start$fe_strand <- 5
       }
 
-      if ( end( tail( RE1, 1 ) ) <  end( tail( RE2, 1 ) ) ){
-        frag <- GRanges( seqnames=chrom, IRanges( start(RE1[length(RE1)]), end(RE2[length(RE2)]) ) )
+      if (end(tail(RE1, 1)) <  end(tail(RE2, 1))){
+        frag <- GRanges(seqnames=chrom, IRanges(start(RE1[length(RE1)]), end(RE2[length(RE2)])))
         RE2.ol.start <- olRanges(frag, RE2)
         RE2.ol.start <- RE2[RE2.ol.start[RE2.ol.start$OLpercS==100]$Sindex]
         nonBlinds.fe3.end <- RE1[length(RE1)]
@@ -598,31 +641,31 @@ Digest <- function( assemblyName, firstcutter_Digest, secondcutter_Digest, baseF
       outFrags <- sort(c(outFrags,blinds, nonBlinds.fe5,nonBlinds.fe3,nonBlinds.fe5.start,nonBlinds.fe3.end))
     }
 
-    outFrags$fe_id <- 1:length( outFrags ) 
-    outFrags$pos <- ifelse( outFrags$fe_strand == 5, start( outFrags )+nchar(firstcutter), end( outFrags )-nchar(firstcutter) ) 
+    outFrags$fe_id <- 1:length(outFrags) 
+    outFrags$pos <- ifelse(outFrags$fe_strand == 5, start(outFrags)+nchar(firstcutter), end(outFrags)-nchar(firstcutter)) 
 
     #Save new RDS
-    saveRDS( outFrags, file=rdsFile )
-    return( outFrags )
+    saveRDS(outFrags, file=rdsFile)
+    return(outFrags)
   } else {
-    message( 'Frag genome file already exists.' )
-    return( 0 )
+    message('Frag genome file already exists.')
+    return(0)
   }
 }
 
-getUniqueFragends <- function( fragsGR_Unique, firstcutter_Unique, secondcutter_Unique, captureLen_Unique, nThreads_Unique, baseFolder_Unique, Bowtie2Folder, assemblyName, config_genomes ) {
+getUniqueFragends <- function(fragsGR_Unique, firstcutter_Unique, secondcutter_Unique, captureLen_Unique=50, nThreads_Unique=4, baseFolder_Unique, Bowtie2Folder, assemblyName, config_genomes){
   ##If captureLen is not in colnames, generate this column
-  if ( paste0( "len", captureLen_Unique ) %in% colnames( elementMetadata( fragsGR_Unique ) ) == FALSE ){
+  if (paste0("len", captureLen_Unique) %in% colnames(elementMetadata(fragsGR_Unique)) == FALSE){
     message(paste('          ### Create FASTA file for capture length', captureLen_Unique))
     fragends <- fragsGR_Unique
     
-    #refGenomeFile <- paste0( Bowtie2Folder, assemblyName )
-    refGenomeFile <- paste0( Bowtie2Folder, "GRCh37p13_primaryAssembly_chrFormat" )
+    #refGenomeFile <- paste0(Bowtie2Folder, assemblyName)
+    refGenomeFile <- paste0(Bowtie2Folder, "GRCh37p13_primaryAssembly_chrFormat")
     
-    fragFile <- paste0( baseFolder_Unique, assemblyName, "_", firstcutter_Unique, "_", secondcutter_Unique, ".rds" )
-    fastaFile <- paste0( baseFolder_Unique, assemblyName, "_", firstcutter_Unique, "_", secondcutter_Unique, "_", captureLen_Unique, ".fa" )
-    bamFile <- paste0( baseFolder_Unique, assemblyName, "_", firstcutter_Unique, "_", secondcutter_Unique, "_", captureLen_Unique, ".bam" )
-    uniquesFile <- paste0( baseFolder_Unique, assemblyName, "_", firstcutter_Unique, "_", secondcutter_Unique, "_", captureLen_Unique, "_unique.txt" )
+    fragFile <- paste0(baseFolder_Unique, assemblyName, "_", firstcutter_Unique, "_", secondcutter_Unique, ".rds")
+    fastaFile <- paste0(baseFolder_Unique, assemblyName, "_", firstcutter_Unique, "_", secondcutter_Unique, "_", captureLen_Unique, ".fa")
+    bamFile <- paste0(baseFolder_Unique, assemblyName, "_", firstcutter_Unique, "_", secondcutter_Unique, "_", captureLen_Unique, ".bam")
+    uniquesFile <- paste0(baseFolder_Unique, assemblyName, "_", firstcutter_Unique, "_", secondcutter_Unique, "_", captureLen_Unique, "_unique.txt")
 
     ## Create FASTA files for mapping back to REFGENOMEs
 
@@ -634,8 +677,8 @@ getUniqueFragends <- function( fragsGR_Unique, firstcutter_Unique, secondcutter_
     end(fragends)[fragends$fe_strand == 5&start(fragends)<(end(fragends)-captureLen_Unique+1)]<-
     start(fragends)[fragends$fe_strand == 5&start(fragends)<(end(fragends)-captureLen_Unique+1)]+captureLen_Unique-1
 
-    do.call( require, args=list( config_genomes[ assemblyName, ] ) )
-    seqs <- getSeq( x=base::get( config_genomes[ assemblyName, ] ), names=fragends )
+    do.call(require, args=list(config_genomes[assemblyName,]))
+    seqs <- getSeq(x=base::get(config_genomes[assemblyName,]), names=fragends)
     names(seqs) <- fragends$fe_id
     writeXStringSet(seqs,fastaFile)
 
@@ -651,46 +694,48 @@ getUniqueFragends <- function( fragsGR_Unique, firstcutter_Unique, secondcutter_
     #This option saves time spent on compression/decompression and is thus preferred when the output is piped to another samtools command. 
     #No sorting is quicker
 
-    cmd <- paste0( "(bowtie2 -p ", nThreads_Unique, " -x ", refGenomeFile, " -f ", fastaFile, " | samtools view -q 1 -hbSu - > ", bamFile, ") 2>&1" )
+    cmd <- paste0("(bowtie2 -p ", nThreads_Unique, " -x ", refGenomeFile, " -f ", fastaFile, " | samtools view -q 1 -hbSu - > ", bamFile, ") 2>&1")
 
     check.trunc <- 0
-    while ( check.trunc < 1 ) {
-      message( paste( "          ### Bowtie2:", captureLen_Unique ) )
-      bowtie.output <- system( cmd, intern=TRUE )
-      if ( length( grep( "[main_samview] truncated file", bowtie.output ) ) == 1 ) {
-        message( paste( "          ### ERROR: Truncated BAM file: repeating Bowtie mapping" ) )
+    while (check.trunc < 1){
+      message(paste("          ### Bowtie2:", captureLen_Unique))
+      bowtie.output <- system(cmd, intern=TRUE)
+      if (length(grep("[main_samview] truncated file", bowtie.output)) == 1){
+        message(paste("          ### ERROR: Truncated BAM file: repeating Bowtie mapping"))
       } else { 
         check.trunc <- 1
       }
     }
 
-    system( paste0( "samtools view ", bamFile, " | grep -v \"XS:\" | cut -f 1 > ", uniquesFile ) )
-    ids <- as.numeric( readLines( uniquesFile ) )
-    elementMetadata( fragsGR_Unique )[[paste0("len", captureLen_Unique)]] <- fragsGR_Unique$fe_id%in%ids #Use Fragend coordinates. not coordinates for unique mapping. 
-    fragsGR_Unique <- fragsGR_Unique[ , order(colnames(elementMetadata(fragsGR_Unique))) ]
-    saveRDS( object=fragsGR_Unique, file=fragFile )
-    unlink( c( fastaFile, bamFile, uniquesFile ) )
+    system(paste0("samtools view ", bamFile, " | grep -v \"XS:\" | cut -f 1 > ", uniquesFile))
+    ids <- as.numeric(readLines(uniquesFile))
+    elementMetadata(fragsGR_Unique)[[paste0("len", captureLen_Unique)]] <- fragsGR_Unique$fe_id%in%ids #Use Fragend coordinates. not coordinates for unique mapping. 
+    fragsGR_Unique <- fragsGR_Unique[, order(colnames(elementMetadata(fragsGR_Unique)))]
+    saveRDS(object=fragsGR_Unique, file=fragFile)
+    unlink(c(fastaFile, bamFile, uniquesFile))
   }
   # if the unique capture len is already in fragGR, we just use that column and rename it to 'unique'
-  fragsGR2 <- fragsGR_Unique[, c("pos", "type", "fe_strand", "fe_id", paste0( "len", captureLen_Unique ) ) ]
-  colnames( elementMetadata( fragsGR2 ) )[5] <- "unique"
-  return( fragsGR2 )
+  fragsGR2 <- fragsGR_Unique[, c("pos", "type", "fe_strand", "fe_id", paste0("len", captureLen_Unique))]
+  colnames(elementMetadata(fragsGR2))[5] <- "unique"
+  return(fragsGR2)
 }
 
-getFragMap <- function( vpChr_FragMap, firstcutter_FragMap, secondcutter_FragMap, genome_FragMap, captureLen_FragMap, nThreads_FragMap, baseFolder_FragMap, Bowtie2Folder, config_genomes ) {
+getFragMap <- function(vpChr_FragMap=NULL, firstcutter_FragMap, secondcutter_FragMap, genome_FragMap, captureLen_FragMap=60, nThreads_FragMap=10, baseFolder_FragMap, Bowtie2Folder, 
+  config_genomes, chr_random=chr_random, chrUn=chrUn, chrM = chrM){
   # here we want to check if we have the genome available for this analysis, in case yes, loading it, otherwise, advice on the 
   # missing genome and switch to the next guy
   # message(paste("      >>> Create frag map for genome :",genome[i],"with re1 :",firstcutter," and re2 :",secondcutter,"and captureLen", captureLen, "<<<"))
-  fragFile <- paste0( baseFolder_FragMap, genome_FragMap,"_", firstcutter_FragMap, "_", secondcutter_FragMap, ".rds" )
+  fragFile <- paste0(baseFolder_FragMap, genome_FragMap,"_", firstcutter_FragMap, "_", secondcutter_FragMap, ".rds")
 
-  if ( file.exists( fragFile ) ) {
+  if (file.exists(fragFile)){
     # File with unique fragends exists, use it to check for unique fragends for given capture length 
-    message( '         ### Loading: ', fragFile )
-    fragsGR <- readRDS( fragFile ) 
+    message('         ### Loading: ', fragFile)
+    fragsGR <- readRDS(fragFile) 
   } else {
     # Make the digest first
-    message( paste0( "         ### Creating new digest for genome : ", genome_FragMap, " with re1 : ", firstcutter_FragMap, " and re2 : ", secondcutter_FragMap ))
-    fragsGR <- Digest( assemblyName=genome_FragMap, firstcutter_Digest=firstcutter_FragMap, secondcutter_Digest=secondcutter_FragMap, baseFolder_Digest=baseFolder_FragMap, config_genomes=config_genomes ) 
+    message(paste0("         ### Creating new digest for genome : ", genome_FragMap, " with re1 : ", firstcutter_FragMap, " and re2 : ", secondcutter_FragMap))
+    fragsGR <- Digest(assemblyName=genome_FragMap, firstcutter_Digest=firstcutter_FragMap, secondcutter_Digest=secondcutter_FragMap, baseFolder_Digest=baseFolder_FragMap, 
+      config_genomes=config_genomes, chr_random=chr_random, chrUn=chrUn, chrM = chrM) 
   }
 
   message('         ### Retrieve and store the unique fragends')
@@ -706,17 +751,17 @@ getFragMap <- function( vpChr_FragMap, firstcutter_FragMap, secondcutter_FragMap
     config_genomes=config_genomes
     )
 
-  if ( !( is.null( vpChr_FragMap ) ) ) {
-    message('         ### Selecting fragments from ', vpChr_FragMap )
-    fragsGR <- subset( fragsGR, as.character( seqnames(fragsGR) ) == vpChr_FragMap & unique == TRUE )
+  if (!(is.null(vpChr_FragMap))){
+    message('         ### Selecting fragments from ', vpChr_FragMap)
+    fragsGR <- subset(fragsGR, as.character(seqnames(fragsGR)) == vpChr_FragMap & unique == TRUE)
   } else {
-    message( '         ### Selecting fragments from whole genome', vpChr_FragMap )
-    fragsGR <- fragsGR[ fragsGR$unique ]
+    message('         ### Selecting fragments from whole genome', vpChr_FragMap)
+    fragsGR <- fragsGR[fragsGR$unique]
   }
   return(fragsGR)
 }
 
-plot.chroms <- function(exp,reads, cutoff, yMax){
+plot.chroms <- function(exp,reads, cutoff=0.999, yMax=2500){
   chroms <- as.character(unique(seqnames(reads)))
   total.reads <- sum(reads$reads)
   abs.cut <- quantile(reads$reads,cutoff, na.rm=T)
@@ -732,18 +777,18 @@ plot.chroms <- function(exp,reads, cutoff, yMax){
   segments(reads$pos,reads$chr,reads$pos,reads$chr+reads$reads)
   lab <- seq(0,ceiling(max(reads$pos)/10e6)*10, by=10)
   axis(1, at = lab*1e6, label=lab, las=2)
-  axis(2, at= 1:length(chroms)+0.5, lab=chroms, lwd=0, las=2 )
+  axis(2, at= 1:length(chroms)+0.5, lab=chroms, lwd=0, las=2)
 }
 
-make.reads.and.bins <- function( reads, assemblyName, res, config_genomes ){
+make.reads.and.bins <- function(reads, assemblyName, res=25e3, config_genomes){
   #Extract fragends with reads
   Captures <- reads[reads$reads>0]
   Captures.rds<-Captures[,1]
   Captures.rds$reads<-round(Captures$normReads,2)
   #make bins
   #Get genome info
-  do.call( require, args=list( config_genomes[ assemblyName, ] ) )
-  assign( 'genome', base::get( config_genomes[ assemblyName, ] ) )
+  do.call(require, args=list(config_genomes[assemblyName,]))
+  assign('genome', base::get(config_genomes[assemblyName,]))
 
   #Chr size
   chr <- as.character(unique(seqnames(reads)))
@@ -767,50 +812,50 @@ make.reads.and.bins <- function( reads, assemblyName, res, config_genomes ){
   return(list(reads=Captures.rds,bins=bin.GR))
 }
 
-export.report <- function( RDS.F, OUTPUT.F ){ 
-  files <- list.files( path=RDS.F, pattern=".rds", recursive=FALSE )
+export.report <- function(RDS.F, OUTPUT.F){ 
+  files <- list.files(path=RDS.F, pattern=".rds", recursive=FALSE)
   report.df <- data.frame()
-  for( i in 1:length( files ) ) {    
-    vpname <- gsub( "[.].*$", "", files[i] )
-    rds <- readRDS( paste0( RDS.F, files[i] ) )
+  for(i in 1:length(files)){    
+    vpname <- gsub("[.].*$", "", files[i])
+    rds <- readRDS(paste0(RDS.F, files[i]))
     report <- rds$report
-    newrow <- data.frame( vpname=vpname,report )
-    report.df <- rbind( report.df, newrow )
+    newrow <- data.frame(vpname=vpname,report)
+    report.df <- rbind(report.df, newrow)
   }
-  write.table( report.df, file=paste0( OUTPUT.F,"/report.txt"), row.names=FALSE, quote=FALSE )
+  write.table(report.df, file=paste0(OUTPUT.F,"/report.txt"), row.names=FALSE, quote=FALSE)
 }
 
-createReport <- function( allReads, mapReads, demuxReads, chromosome, vpPos, normFactor, wSize, nTop, motifPosperc, readlenperc){
-  nMapped <- length( mapReads )
-  uniqueReads <- sum( allReads$reads )
-  uniqueCaptures <- sum( allReads$reads>0 )
+createReport <- function(allReads, mapReads, demuxReads, chromosome, vpPos, normFactor=1e6, wSize, nTop, motifPosperc, readlenperc){
+  nMapped <- length(mapReads)
+  uniqueReads <- sum(allReads$reads)
+  uniqueCaptures <- sum(allReads$reads>0)
 
-  reads <- allReads[ as.vector( seqnames( allReads ) ) == chromosome ]
+  reads <- allReads[as.vector(seqnames(allReads)) == chromosome]
 
-  cisReads <- sum( reads$reads )
-  percCis<-round( 100*cisReads/uniqueReads, 2 ) #this does not exclude the Top reads..
-  cisCaptures <- sum( reads$reads>0 )
+  cisReads <- sum(reads$reads)
+  percCis<-round(100*cisReads/uniqueReads, 2) #this does not exclude the Top reads..
+  cisCaptures <- sum(reads$reads>0)
 
-  nMappedCis <- length( mapReads[ seqnames( mapReads ) == chromosome ] )
-  nMappedCisperc <- round( 100*nMappedCis/nMapped, 2 )
+  nMappedCis <- length(mapReads[seqnames(mapReads) == chromosome])
+  nMappedCisperc <- round(100*nMappedCis/nMapped, 2)
 
-  topIdx <- 1:length( reads ) %in% order( -reads$reads )[ 1:nTop ]
-  topReads <- sum( reads$reads[ topIdx ] )
-  topPct <- round( 100*topReads/cisReads, digits=2 )
-  readsGR <- reads[ !topIdx ]
+  topIdx <- 1:length(reads) %in% order(-reads$reads)[1:nTop]
+  topReads <- sum(reads$reads[topIdx])
+  topPct <- round(100*topReads/cisReads, digits=2)
+  readsGR <- reads[!topIdx]
 
-  allReads.nTop <- subsetByOverlaps( allReads, reads[ topIdx ], invert=T )
-  uniqueReads.nTop <- sum( allReads.nTop$reads )
-  cisReads.nTop <- sum( readsGR$reads )
-  percCis.nTop <- round( 100*cisReads.nTop/uniqueReads.nTop, 2 )
+  allReads.nTop <- subsetByOverlaps(allReads, reads[topIdx], invert=T)
+  uniqueReads.nTop <- sum(allReads.nTop$reads)
+  cisReads.nTop <- sum(readsGR$reads)
+  percCis.nTop <- round(100*cisReads.nTop/uniqueReads.nTop, 2)
 
-  vpWithin100Kb <- readsGR[ unique( queryHits( findOverlaps( ranges( readsGR ), resize( IRanges( vpPos, vpPos ), width=2e5, fix="center" ) ) ) ) ]
-  capt100Kb <- round( 100*mean( vpWithin100Kb$reads>0 ), digits=2 )
-  cov100Kb <- round( 100*sum( vpWithin100Kb$reads )/sum( readsGR$reads ), digits=2 )
+  vpWithin100Kb <- readsGR[unique(queryHits(findOverlaps(ranges(readsGR), resize(IRanges(vpPos, vpPos), width=2e5, fix="center"))))]
+  capt100Kb <- round(100*mean(vpWithin100Kb$reads>0), digits=2)
+  cov100Kb <- round(100*sum(vpWithin100Kb$reads)/sum(readsGR$reads), digits=2)
 
-  vpWithin1Mb <- readsGR[ unique( queryHits( findOverlaps( ranges( readsGR ), resize( IRanges( vpPos, vpPos ), width=2e6, fix="center" ) ) ) ) ]
-  capt1Mb <- round( 100*mean( vpWithin1Mb$reads>0 ), digits=2 )
-  cov1Mb <- round( 100*sum( vpWithin1Mb$reads )/sum( readsGR$reads ), digits=2 )
+  vpWithin1Mb <- readsGR[unique(queryHits(findOverlaps(ranges(readsGR), resize(IRanges(vpPos, vpPos), width=2e6, fix="center"))))]
+  capt1Mb <- round(100*mean(vpWithin1Mb$reads>0), digits=2)
+  cov1Mb <- round(100*sum(vpWithin1Mb$reads)/sum(readsGR$reads), digits=2)
 
   report <- data.frame(
     nReads=demuxReads, # total demux reads
@@ -834,508 +879,66 @@ createReport <- function( allReads, mapReads, demuxReads, chromosome, vpPos, nor
     stringsAsFactors=FALSE
   )
 
-  return( report )
+  return(report)
 }
 
-#createPlot <- function( plotTitle, vpPos, chromosome, fragGR, plotLegend=NULL, plotView=1e6, maxY=2500, minY=0, xaxisUnit=c( 'Mb', 'Kb', 'bp' ), plotRegion='cis', foldOut='./', plotType=c( 'PDF', 'PNG' ) ) {
-createPlot <- function( plotTitle, vpPos, chromosome, fragGR, plotLegend, plotView, maxY, minY, xaxisUnit, plotRegion, foldOut, plotType ) {
-  xaxisUnit <- match.arg( xaxisUnit, c( 'Mb', 'Kb', 'bp' ))
-  if( plotRegion == 'cis' ){
-    if( xaxisUnit == 'Mb' ){
+createPlot <- function(plotTitle, vpPos, chromosome, fragGR, plotLegend=NULL, plotView=1e6, maxY=2500, minY=0, xaxisUnit=c('Mb', 'Kb', 'bp'), plotRegion='cis', foldOut='./', plotType=c('PDF', 'PNG')){
+  xaxisUnit <- match.arg(xaxisUnit, c('Mb', 'Kb', 'bp'))
+  if(plotRegion == 'cis'){
+    if(xaxisUnit == 'Mb'){
       scaleValue <- 1e6
-    } else if (xaxisUnit == 'Kb' ) {
+    } else if (xaxisUnit == 'Kb'){
         scaleValue <- 1e3
     } else {
       scaleValue <- 1
     }
-    zoom <- GRanges( seqnames=chromosome, IRanges( start=vpPos-plotView, end=vpPos+plotView) )
-    if ( start( zoom ) < 1 ) {
-      start( zoom ) <- 1
+    zoom <- GRanges(seqnames=chromosome, IRanges(start=vpPos-plotView, end=vpPos+plotView))
+    if (start(zoom) < 1){
+      start(zoom) <- 1
     }
-    reads.zoom <- fragGR[ unique( findOverlaps( fragGR, zoom )@from ) ]
-    if( plotType == 'PDF' ){
-      pdf( file=paste0( foldOut, plotTitle, ".pdf" ) )
+    reads.zoom <- fragGR[unique(findOverlaps(fragGR, zoom)@from)]
+    if(plotType == 'PDF'){
+      pdf(file=paste0(foldOut, plotTitle, ".pdf"))
     } else {
-      png( file=paste0( foldOut, plotTitle, ".png" ), width=3200, height=3200, res=300 )
+      png(file=paste0(foldOut, plotTitle, ".png"), width=3200, height=3200, res=300)
     }
     plot(reads.zoom$pos/scaleValue, 
       reads.zoom$norm4C,
       type = "h",
-      xlim = c( start(zoom)/scaleValue, end(zoom)/scaleValue ),
-      ylim = c( minY, maxY ),
-      xlab = paste0( chromosome," - Chromosome position (", xaxisUnit, ")" ),
-      ylab = paste0( "4C Coverage / ", scaleValue, " mapped reads" ),
+      xlim = c(start(zoom)/scaleValue, end(zoom)/scaleValue),
+      ylim = c(minY, maxY),
+      xlab = paste0(chromosome," - Chromosome position (", xaxisUnit, ")"),
+      ylab = paste0("4C Coverage / ", scaleValue, " mapped reads"),
       frame.plot = FALSE,
-      main = plotTitle )
-    if ( !is.null(plotLegend) ){
-      legend( x="topleft", bty="n", legend=paste0( names( plotLegend ), " : ", plotLegend ) )
+      main = plotTitle)
+    if (!is.null(plotLegend)){
+      legend(x="topleft", bty="n", legend=paste0(names(plotLegend), " : ", plotLegend))
     }
     dev.off()
-  } else if( plotRegion == "all" ) {
-    if( plotType == 'PDF' ){
-      pdf( file=paste0( foldOut, plotTitle, ".pdf" ) )
+  } else if(plotRegion == "all"){
+    if(plotType == 'PDF'){
+      pdf(file=paste0(foldOut, plotTitle, ".pdf"))
     } else {
-      png( file=paste0( foldOut, plotTitle, ".png" ), width = 1200, height = 600, res = 300)
+      png(file=paste0(foldOut, plotTitle, ".png"), width = 1200, height = 600, res = 300)
     }
-  plot.chroms( exp=plotTitle, reads=fragGR$bins, cutoff=0.999, yMax=maxY )
+  plot.chroms(exp=plotTitle, reads=fragGR$bins, cutoff=0.999, yMax=maxY)
   dev.off()
   }
 }
 
-Run.4Cpipeline <- function( VPinfo.file, FASTQ.F, OUTPUT.F, configuration ){
-  #4C-pipeline
-  #1. demux.FASTQ
-  #2. trim.FASTQ
-  #3. mapped trimmer.files using bowtie2
-  #4. extract unique reads
-  #5. make RDS file
-  #6. make PDF
-  #7. make WIG
-  #8. make report
-
-
-  cutoff = configuration$qualityCutoff
-  trim.length = configuration$trimLength
-  min.amount.reads=configuration$minAmountReads
-  reads.quality=configuration$readsQuality
-  map.unique = configuration$mapUnique
-  nThreads = configuration$cores
-  wSize = configuration$wSize
-  nTop = configuration$nTop
-  nonBlind = configuration$nonBlind
-  make.wig = configuration$wig
-  make.cisplot = configuration$cisplot
-  make.gwplot = configuration$genomePlot
-  tsv = configuration$tsv
-  bins=configuration$bins
-  mmMax=configuration$mmMax
-  normFactor=configuration$normFactor
-  rImage=configuration$rImage
-
-  # create folders
-
-  # define folder names
-  LOG.F <- gsub( x=paste0( OUTPUT.F, "/LOG/" ), pattern='//', replacement='/' )
-  FASTQ.demux.F <- gsub( x=paste0( OUTPUT.F, "/FASTQ/" ), pattern='//', replacement='/' )
-  TRIM.F <-gsub( x=paste0( OUTPUT.F, "/TRIMMED/" ), pattern='//', replacement='/' )
-  BAM.F <-gsub( x=paste0( OUTPUT.F, "/BAM/" ), pattern='//', replacement='/' )
-  RDS.F <-gsub( x=paste0( OUTPUT.F, "/RDS/" ), pattern='//', replacement='/' )
-  RDS.BIN.F <- gsub( x=paste0( OUTPUT.F, "/RDS-BIN/" ), pattern='//', replacement='/' )
-  PLOT.F <- gsub( x=paste0( OUTPUT.F, "/PLOT/" ), pattern='//', replacement='/' )
-  WIG.F <- gsub( x=paste0( OUTPUT.F, "/WIG/" ), pattern='//', replacement='/' )
-  GENOMEPLOT.F <- gsub( x=paste0( OUTPUT.F, "/GENOMEPLOT/" ), pattern='//', replacement='/' )
-  TSV.F <- gsub( x=paste0( OUTPUT.F, "/TSV/" ), pattern='//', replacement='/' )
-  
-  R.IMAGE <- gsub( x=paste0( OUTPUT.F, "/R_IMAGE/" ), pattern='//', replacement='/' )
-
-  logDirs <- list()
-
-  ##To do: replace ifelse for if statement or give FALSE statement...
-  logDirs$outFolder <- ifelse( !dir.exists( OUTPUT.F ), dir.create( OUTPUT.F ), FALSE )
-  logDirs$logFolder <- ifelse( !dir.exists( LOG.F ), dir.create( LOG.F ), FALSE )
-  logDirs$fastqFolder <- ifelse( !dir.exists( FASTQ.demux.F ), dir.create( FASTQ.demux.F ), FALSE )
-  logDirs$trimFolder <- ifelse( !dir.exists( TRIM.F ), dir.create( TRIM.F ), FALSE )
-  logDirs$bamFolder <- ifelse( !dir.exists( BAM.F ), dir.create( BAM.F ), FALSE )
-  logDirs$rdsFolder <- ifelse( !dir.exists( RDS.F ), dir.create( RDS.F ), FALSE )
-  logDirs$rdsbinFolder <- ifelse( !dir.exists( RDS.BIN.F ), dir.create( RDS.BIN.F ), FALSE )
-
-  # Extract experiments from VPinfo, remove weird characters and save in output folder. 
-  message( paste0( "\n------ Reading the VP info file: ", VPinfo.file ) )
-  VPinfo <- Read.VPinfo( VPinfo.file )
-  if (is.null(VPinfo)){
-    stop( "viewpoint info file (vpFile) not correct." )
-  }
-  write.table( VPinfo, paste0( OUTPUT.F, "/VPinfo.txt" ), sep="\t", row.names=FALSE, quote=F )
-
-  if ( make.cisplot == TRUE ){
-    logDirs$plotFolder <- ifelse( !dir.exists( PLOT.F ), dir.create( PLOT.F ), FALSE )
-  }
-  if ( make.wig == TRUE ){
-    logDirs$wigFolder <- ifelse( !dir.exists( WIG.F ), dir.create( WIG.F ), FALSE )
-  }
-  if( any( VPinfo$analysis == 'all' ) & make.gwplot ){
-    logDirs$genomeplotFolder <- ifelse( !dir.exists( GENOMEPLOT.F ), dir.create( GENOMEPLOT.F ), FALSE )
-  }
-  if ( tsv == TRUE ){
-    logDirs$tsvFolder <- ifelse( !dir.exists( TSV.F ), dir.create( TSV.F ), FALSE )
-  }
-  if ( rImage == TRUE ){
-    logDirs$rImage<- ifelse( !dir.exists( R.IMAGE), dir.create( R.IMAGE ), FALSE )
-  }
-
-  # Make Log files
-  LOGNAME <- format( Sys.time(), '%Y_%m_%d__%H_%M_%S' )
-  log.path <- paste0( LOG.F, "Log_", LOGNAME, ".txt" )
-  demux.log.path <- paste0( LOG.F, "Log_demux_", LOGNAME, ".txt" )
-  trim.log.path <- paste0( LOG.F, "Log_4Ctrim_", LOGNAME, ".txt" )
-  bowtie.log.path <- paste0( LOG.F, "Bowtie2Log_", LOGNAME, ".txt" )
-
-  # Save Run parameters to logfile
-  run.par <- data.frame(
-    param=c( "pipeline.version", "baseFolder", "VPinfo.file", "FASTQ.F", "OUTPUT.F", "cutoff", "trim.length"
-      , "reads.quality", "map.unique", "wSize", "nTop", "make.wig", "make.cisplot", "make.gwplot", "nThreads"
-      , "normFactor", "nonBlind", "tsv","bins", "mmMax" ),
-    value=c( configuration$pipeline.version, configuration$baseFolder, VPinfo.file, FASTQ.F, OUTPUT.F, cutoff, trim.length
-      ,reads.quality, map.unique, wSize, nTop, make.wig, make.cisplot, make.gwplot, nThreads,normFactor
-      ,nonBlind,tsv,bins,mmMax)
-    )
-
-  write.table( run.par, log.path, quote=FALSE, col.names=FALSE, row.names=FALSE, append=TRUE )
-
-
-  #Demultiplex all fastq files and write in FASTQ folder in OUTPUT.F
-  message("\n------ Demultiplexing Fastq files based on VPinfo file")
-  demux.FASTQ( VPinfo=VPinfo, FASTQ.F=FASTQ.F, FASTQ.demux.F=FASTQ.demux.F, demux.log.path=demux.log.path, mmMax = mmMax)
-
-  #4C-seq analysis
-
-  exp.name <- as.character( VPinfo$expname )
-  primer <- as.character( VPinfo$primer )
-  genome <- as.character( VPinfo$genome )
-  firstenzyme <-as.character( VPinfo$firstenzyme )
-  secondenzyme <- as.character( VPinfo$secondenzyme )
-  vpChr <- as.character( VPinfo$vpchr )
-  vppos <- as.numeric( VPinfo$vppos )
-  analysis <- as.character( VPinfo$analysis )
-
-  message( "\n------ 4Cseq analysis" )
-
-  for ( i in 1:length( exp.name ) ) {
-
-    message( paste0( " +++ experiment: ", exp.name[i], " +++" ) )
-
-    #skip already generated files
-    rdsFile<-paste0( RDS.F, exp.name[i], ".rds" )
-    if (file.exists( rdsFile ) ) {
-      error.msg <- paste("         ### WARNING: rds file", exp.name[i], "already exist, skipping experiment.")
-      write( error.msg, log.path, append=TRUE )
-      message( error.msg )
-      next
-    }
-
-
-    primer.sequence <- primer[i]
-
-    file.fastq <- paste0( FASTQ.demux.F, exp.name[i], ".fastq.gz" )
-    CHR <- paste0("chr", vpChr[i])
-
-    if ( exp.name[i] %in% exp.name[ duplicated( exp.name ) ] ) {
-      error.msg <- paste0( "      ### ERROR: Experiment name not unique for ", exp.name[i] )
-      write( error.msg, log.path, append=TRUE )
-      message( error.msg )
-      next
-    }
-
-    if ( !( firstenzyme[i] %in% rownames( configuration$enzymes ) ) ) {
-      error.msg <- paste0( "      ### ERROR: firstcutter not found for ", exp.name[i] )
-      write( error.msg, log.path, append=TRUE )
-      message( error.msg )
-      next
-    }
-
-    firstcutter <- configuration$enzyme[ firstenzyme[i], ]
-
-    if ( !( secondenzyme[i] %in% rownames( configuration$enzymes ) ) ) {
-      error.msg <- paste0( "      ### ERROR: secondcutter not found for ", exp.name[i] )
-      write( error.msg, log.path, append=TRUE )
-      message( error.msg )
-      next
-    }
-
-    secondcutter <- configuration$enzyme[ secondenzyme[i], ]
-
-    if ( !(genome[i] %in% rownames( configuration$genomes )) ) {
-      error.msg <- paste0( "      ### ERROR: genome not found for ", exp.name[i] )
-      write( error.msg, log.path, append=TRUE )
-      message( error.msg )
-      next
-    }
-
-    if ( !(analysis[i] %in% c("cis", "all"))) {
-      error.msg <- paste0( "      ### ERROR: analysis of cis/all not found for ", exp.name[i] )
-      write( error.msg, log.path, append=TRUE )
-      message( error.msg )
-      next
-    }
-
-    if ( !file.exists( file.fastq ) ) {
-      error.msg <- paste0( "      ### ERROR:", exp.name[i], " FASTQ file does not exist" )
-      write( error.msg, log.path, append=TRUE )
-      message( error.msg )
-      next
-    }
-
-    message( "      >>> Trim of the fastq <<<" )
-    trim.FASTQ <- trim.FASTQ( exp.name=exp.name[i], firstcutter=firstcutter, secondcutter=secondcutter, file.fastq=file.fastq, trim.F=TRIM.F, cutoff=cutoff, trim.length=trim.length, log.path=trim.log.path, min.amount.reads=min.amount.reads)
-
-    txt.tmp <- paste0( TRIM.F, exp.name[i], ".txt" )
-    if ( !file.exists( txt.tmp ) ){
-      error.msg <- paste0( "         ### ERROR:", exp.name[i], " trimmed file not found" )
-      write( error.msg, log.path, append=TRUE )
-      message( error.msg )
-      next
-    }
-
-    captureLen <- trim.FASTQ$captureLen
-
-    if (captureLen<=nchar(firstcutter)){
-      error.msg <- paste0( "         ### ERROR:", exp.name[i], " capture length <= length firstcutter motif.")
-      message("         ### Skipping experiment.")
-      write( error.msg, log.path, append=TRUE )
-      message( error.msg )
-      next
-    }
-
-    nReads <- trim.FASTQ$nReads
-    motifPosperc <-trim.FASTQ$motifPosperc
-    readlenperc <- trim.FASTQ$readlenperc
-
-
-
-
-    # 3. make BAM files
-
-    message( "      >>> Alignment of reads to reference genome <<<" )
-    bamFile <- paste0( BAM.F, exp.name[i], ".bam" )
-    if ( !file.exists( bamFile ) ) {
-    #Original
-    #makeBAM( exp.name=exp.name[i], BAM.F=BAM.F, NCORES=nThreads, Bowtie2Folder=configuration$bt2Genomes[ genome[i], ], genome=genome[i], txt.tmp=txt.tmp, log.path=log.path, bowtie.log.path=bowtie.log.path, bamFile=bamFile, map.unique=map.unique, readsQual=reads.quality )
-    makeBAM( exp.name=exp.name[i], BAM.F=BAM.F, NCORES=nThreads, Bowtie2Folder=configuration$bt2Genomes[ genome[i], ], genome="GRCh37p13_primaryAssembly_chrFormat", txt.tmp=txt.tmp, log.path=log.path, bowtie.log.path=bowtie.log.path, bamFile=bamFile, map.unique=map.unique, readsQual=reads.quality )
-    } else {
-      error.msg <- paste("         ### WARNING:", exp.name[i], "BAM file already exist, continuing with exisiting file.")
-      write( error.msg, log.path, append=TRUE )
-      message( error.msg )
-    }
-
-    mappedReads <- readGAlignments( file=bamFile, index=bamFile )
-
-
-    # To do: lock frag map
-    #exec 3>hg19_Dpn2_Csp6I # open a file handle; this part will always succeed
-    #flock -x 3      # lock the file handle; this part will block
-    #To release the lock:
-    #exec 3>&-       # close the file handle
-
-
-
-    message( paste0("      >>> Create frag map for genome:", genome[i], " with RE1:", firstcutter, "and RE2:", secondcutter, " and capture length:", captureLen, " <<<" ) )
-    frags <- getFragMap(
-      vpChr_FragMap=NULL
-      ,firstcutter_FragMap=firstcutter
-      ,secondcutter_FragMap=secondcutter
-      ,genome_FragMap=genome[i]
-      ,captureLen_FragMap=captureLen
-      ,nThreads_FragMap=nThreads
-      ,baseFolder_FragMap=configuration$baseFolder
-      ,Bowtie2Folder=configuration$bt2Genomes[ genome[i], ]
-      ,config_genomes=configuration$genomes
-      )
-
-
-    message("      >>> Align reads to fragments <<<")
-    readsAln <- alignToFragends(
-      gAlign=mappedReads, 
-      fragments=frags,
-      firstcut=firstcutter
-      )
-
-    message("      >>> Compute statistics and create report <<<")
-    reportAnalysis <- createReport( allReads=readsAln
-      , mapReads=mappedReads
-      , demuxReads=nReads
-      , chromosome=CHR
-      , vpPos=vppos[i]
-      , normFactor=normFactor
-      , wSize=wSize
-      , nTop=nTop
-      , motifPosperc=motifPosperc
-      , readlenperc=readlenperc
-      )
-
-    vpInfo <- data.frame(
-      name=exp.name[i]
-      , Fastq=file.fastq
-      , primer=primer.sequence
-      , genome=genome[i]
-      , firstcutter=firstcutter
-      , secondcutter=secondcutter
-      , chr=CHR
-      , pos=vppos[i]
-      , captureLen=captureLen
-      , date=Sys.time()
-      , Pipeline=configuration$pipeline.version
-      )
-
-
-    #Extract Cis reads.
-    message("      >>> Compute normalized 4C score per fragment <<<")
-
-    rdsFile<-paste0( RDS.F, exp.name[i], ".rds" )
-    if (file.exists( rdsFile ) ) {
-      error.msg <- paste("         ### WARNING: rds file", exp.name[i], "already exist, overwriting exisiting file.")
-      write( error.msg, log.path, append=TRUE )
-      message( error.msg )
-    }
-
-    if ( analysis[i] == "cis" | make.cisplot == TRUE ) {
-      reads.cis <- norm4C( readsGR=readsAln[ as.vector( seqnames( readsAln ) ) == CHR ], nReads=normFactor, wSize=wSize, nTop=nTop )
-
-      if ( nonBlind ) {
-        reads.cis<-reads.cis[reads.cis$type=="non_blind"]
-      }
-    }
-
-    if ( analysis[i] == "cis" ) {
-      saveRDS( list( reads=reads.cis, report=reportAnalysis, vpInfo=vpInfo ), file=rdsFile)
-    }
-
-    if ( analysis[i] == "all" ) {
-    #normalization all reads is used
-    reads.all <- norm4C( readsGR=readsAln, nReads=normFactor, wSize=wSize, nTop=nTop )
-    }
-
-    if ( bins == TRUE | make.gwplot == TRUE ) {
-      if ( analysis[i] == "all" ) {
-        message("      >>> Creating bins <<<")
-        bin.GR <- make.reads.and.bins( reads=reads.all, assemblyName=genome[i], res=configuration$binSize, config_genomes=configuration$genomes )
-        file.out <- paste0( RDS.BIN.F, exp.name[i], "_bin_res_", (configuration$binSize/1e3), "kb.rds" )
-        saveRDS( object=list( reads=bin.GR$reads, bins=bin.GR$bins, report=reportAnalysis, vpInfo=vpInfo ), file=file.out, compress=TRUE )
-      }
-    }
-
-    if ( analysis[i] == "all" ) {
-      if ( nonBlind ) {
-        reads.all<-reads.all[reads.all$type=="non_blind"]
-      }
-      saveRDS( list( reads=reads.all, report=reportAnalysis, vpInfo=vpInfo ), file=rdsFile)
-    }
-
-    if ( make.cisplot == TRUE ) {
-      message("      >>> Creating local 4C Plot <<<")
-      createPlot( 
-        plotTitle=exp.name[i]
-        , vpPos=vppos[i]
-        , chromosome=CHR
-        , fragGR=reads.cis
-        , plotLegend=reportAnalysis
-        , plotView=configuration$plotView
-        , maxY=configuration$maxY
-        , minY=0
-        , xaxisUnit=configuration$xaxisUnit
-        , plotRegion='cis'
-        , foldOut=PLOT.F
-        , plotType=configuration$plotType
-        )
-    }
-
-    if ( analysis[i]=="all" & make.gwplot == TRUE ) {
-      message("      >>> Creating genome-wide 4C coverage Plot <<<")
-      createPlot( 
-        plotTitle=exp.name[i]
-        , vpPos=vppos[i]
-        , chromosome=CHR
-        , fragGR=bin.GR
-        , plotLegend=reportAnalysis
-        , plotView=configuration$plotView
-        , maxY=configuration$maxY
-        , minY=0
-        , xaxisUnit=configuration$xaxisUnit
-        , plotRegion='all'
-        , foldOut=GENOMEPLOT.F
-        , plotType=configuration$plotType
-        )
-
-    }
-
-    #7. make WIG
-    if ( make.wig == TRUE ) {
-      message("      >>> Create WIG file <<<")
-
-      if ( nonBlind ) {
-        wigFile <- paste0( WIG.F, exp.name[i], "_nonblind_WIN",wSize,".wig" )
-      }else{
-        wigFile <- paste0( WIG.F, exp.name[i],"_WIN",wSize ,".wig" )
-      }
-
-      if ( file.exists( wigFile ) ){
-        error.msg <- paste( "         ### WARNING:", exp.name[i], "WIG file already exist." )
-        message( error.msg )
-        write( error.msg, log.path, append=TRUE )
-      } else {
-        if ( analysis[i] == "cis" ) {
-          reads.wig <- reads.cis[ order( reads.cis$pos ) ]
-        }else{
-          reads.wig <- reads.all[ order( seqnames(reads.all),reads.all$pos ) ]
-        }
-        exportWig( gR=reads.wig, expName=exp.name[i], filename=wigFile, vpPos=vppos[i], vpChr=CHR, plotView=configuration$plotView)
-      }
-    }
-
-    if ( tsv == TRUE ) {
-      message("      >>> Create TSV file <<<")
-
-      if ( nonBlind ) {
-        tsvFile <- paste0( TSV.F, exp.name[i], "_nonblind_WIN",wSize,".tsv" )
-      }else{
-        tsvFile <- paste0( TSV.F, exp.name[i],"_WIN",wSize ,".tsv" )
-      }
-
-
-
-      if ( file.exists( tsvFile ) ){
-        error.msg <- paste( "         ### WARNING:", exp.name[i], "TSV file already exist." )
-        message( error.msg )
-        write( error.msg, log.path, append=TRUE )
-      } else {
-        if ( analysis[i] == "cis" ) {
-          reads.tsv <- reads.cis[ order( reads.cis$pos ) ]
-        }else{
-          reads.tsv <- reads.all[ order( seqnames(reads.all),reads.all$pos ) ]
-        }
-
-        gzname<- paste0( tsvFile, ".gz" )
-        gz1 <- gzfile( gzname, "w" )
-        tsvdat <- data.frame(chr=seqnames(reads.tsv)
-          ,start=start(reads.tsv)
-          ,end=end(reads.tsv)
-          ,pos=reads.tsv$pos
-          ,type=reads.tsv$type
-          ,fe_strand=reads.tsv$fe_strand
-          ,fe_id=reads.tsv$fe_id
-          ,reads=reads.tsv$reads
-          ,normReads=reads.tsv$normReads
-          ,norm4C=reads.tsv$norm4C)
-
-        write.table( tsvdat, file=gz1, append=FALSE, sep="\t", quote=FALSE, row.names=FALSE, col.names=TRUE )
-      }
-      close(gz1)
-    }
-
-    # Save R image
-    if ( rImage == TRUE ){
-      save.image(paste0(R.IMAGE, "image_R", exp.name[i], ".Rdata"))
-    }
-    message('\n')
-  }
-
-  #make report from all RDS files
-  message( "------ Writing final report\n" )
-  export.report( RDS.F, OUTPUT.F )
-}
-
-getVPReads <- function(rds,vpRegion) {
+getVPReads <- function(rds,vpRegion=2e6){
   reads <- rds$reads
   vppos <- rds$vpInfo$pos
   vpChr <- rds$vpInfo$chr
 
-  zoom <- GRanges( seqnames=vpChr, resize(IRanges(vppos, vppos), width=vpRegion, fix="center"))
+  zoom <- GRanges(seqnames=vpChr, resize(IRanges(vppos, vppos), width=vpRegion, fix="center"))
   vpGR <- reads[unique(queryHits(findOverlaps(reads,zoom)))]
   peakCDat <- data.frame(pos=vpGR$pos,reads=vpGR$reads)
 
   return(peakCDat)
 }
 
-getPeakCPeaks <- function(resPeakC, min.gapwidth=0) {
+getPeakCPeaks <- function(resPeakC, min.gapwidth=0){
 
   vpChr <- resPeakC$vpChr
 
@@ -1346,16 +949,16 @@ getPeakCPeaks <- function(resPeakC, min.gapwidth=0) {
 
 }
 
-exportPeakCPeaks <- function(resPeakC, bedFile, name=NULL, desc=NULL, includeVP=TRUE, min.gapwidth=0) {
+exportPeakCPeaks <- function(resPeakC, bedFile, name=NULL, desc=NULL, includeVP=TRUE, min.gapwidth=0){
 
   vpChr <- resPeakC$vpChr
   vpPos <- resPeakC$vpPos
 
-  if(is.null(name)) {
+  if(is.null(name)){
     name <- "peakC_track"
   }
 
-  if(is.null(desc)) {
+  if(is.null(desc)){
     desc <- paste0("peakC peaks on ", vpChr)
   }
 
@@ -1368,11 +971,11 @@ exportPeakCPeaks <- function(resPeakC, bedFile, name=NULL, desc=NULL, includeVP=
   trackLine <- paste0('track name=\"', name, '\" description=\"', desc, '\" visibility=2 itemRgb=\"On\"', "\n")
   cat(trackLine, file=bedFile, append=TRUE)
 
-  if(min.gapwidth>0) {
+  if(min.gapwidth>0){
     resPeakC$exportPeakGR <- getPeakCPeaks(resPeakC, min.gapwidth=min.gapwidth)
   }
 
-  if(includeVP) {
+  if(includeVP){
     bedDF <- as.data.frame(resPeakC$exportPeakGR)[,1:3]
     colnames(bedDF)[1] <- "chr"
     write.table(bedDF, file=bedFile, sep="\t", row.names=FALSE, col.names=FALSE, quote=FALSE, append=TRUE)
@@ -1383,26 +986,26 @@ exportPeakCPeaks <- function(resPeakC, bedFile, name=NULL, desc=NULL, includeVP=
   }
 }
 
-doPeakC <- function(rdsFiles, vpRegion=2e6, wSize=21, alphaFDR=0.05, qWd=1.5, qWr=1, minDist=15e3) {
-  if( !suppressMessages(require( "peakC", character.only=TRUE ) ) ) stop( "Package not found: peakC" )
-  if( !suppressMessages(require( "GenomicRanges", character.only=TRUE ) ) ) stop( "Package not found: GenomicRanges" )
+doPeakC <- function(rdsFiles, vpRegion=2e6, wSize=21, alphaFDR=0.05, qWd=1.5, qWr=1, minDist=15e3){
+  if(!suppressMessages(require("GenomicRanges", character.only=TRUE))) stop("Package not found: GenomicRanges")
+  if(!suppressMessages(require("peakC", character.only=TRUE))) stop("Package not found: peakC")
 
   # Analyze num.exp replicated 4C-Seq experiments with peakC 
   num.exp <- length(rdsFiles)
   message("Performing peakC on ",num.exp, " experiments.")
 
-  if(num.exp>1) {
+  if(num.exp>1){
     peakCDat <- list()
     vppos <- vector()
-    for(i in 1:num.exp) {
-      if(file.exists(rdsFiles[i])) {
+    for(i in 1:num.exp){
+      if(file.exists(rdsFiles[i])){
         message("Loading data for experiment: ", basename(rdsFiles[i]))
         rds <- readRDS(rdsFiles[i])
         vppos[i] <- rds$vpInfo$pos
         vpChr <- as.vector(rds$vpInfo$chr)
         peakCDat[[i]] <- getVPReads(rds=rds, vpRegion=vpRegion)
       } else {
-        stop( paste0("File not found: ",rdsFiles[i]) )
+        stop(paste0("File not found: ",rdsFiles[i]))
       }
     }
     vppos <- unique(vppos)
@@ -1429,10 +1032,456 @@ doPeakC <- function(rdsFiles, vpRegion=2e6, wSize=21, alphaFDR=0.05, qWd=1.5, qW
 
     resPeakC$vpPos <- vppos
     resPeakC$vpChr <- vpChr
-    if(length(resPeakC$peak)>0) {
+    if(length(resPeakC$peak)>0){
       resPeakC$exportPeakGR <- getPeakCPeaks(resPeakC)
     } else {
       resPeakC$exportPeakGR <- NULL
     }
     return(resPeakC)
+}
+
+Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
+  #4C-pipeline
+  #1. demux.FASTQ
+  #2. trim.FASTQ
+  #3. mapped trimmer.files using bowtie2
+  #4. extract unique reads
+  #5. make RDS file
+  #6. make PDF
+  #7. make WIG
+  #8. make report
+
+
+  cutoff = configuration$qualityCutoff
+  trim.length = configuration$trimLength
+  min.amount.reads=configuration$minAmountReads
+  reads.quality=configuration$readsQuality
+  map.unique = configuration$mapUnique
+  nThreads = configuration$cores
+  wSize = configuration$wSize
+  nTop = configuration$nTop
+  nonBlind = configuration$nonBlind
+  make.wig = configuration$wig
+  make.cisplot = configuration$cisplot
+  make.gwplot = configuration$genomePlot
+  tsv = configuration$tsv
+  bins = configuration$bins
+  mmMax = configuration$mmMax
+  normFactor = configuration$normFactor
+  peakC = configuration$peakC
+  replicates = configuration$replicates
+  chr_random = configuration$chr_random, 
+  chrUn = configuration$chrUn, 
+  chrM = configuration$chrM
+
+  # create folders
+
+  # define folder names
+  LOG.F <- gsub(x=paste0(OUTPUT.F, "/LOG/"), pattern='//', replacement='/')
+  FASTQ.demux.F <- gsub(x=paste0(OUTPUT.F, "/FASTQ/"), pattern='//', replacement='/')
+  TRIM.F <-gsub(x=paste0(OUTPUT.F, "/TRIMMED/"), pattern='//', replacement='/')
+  BAM.F <-gsub(x=paste0(OUTPUT.F, "/BAM/"), pattern='//', replacement='/')
+  RDS.F <-gsub(x=paste0(OUTPUT.F, "/RDS/"), pattern='//', replacement='/')
+  RDS.BIN.F <- gsub(x=paste0(OUTPUT.F, "/RDS-BIN/"), pattern='//', replacement='/')
+  PLOT.F <- gsub(x=paste0(OUTPUT.F, "/PLOT/"), pattern='//', replacement='/')
+  WIG.F <- gsub(x=paste0(OUTPUT.F, "/WIG/"), pattern='//', replacement='/')
+  GENOMEPLOT.F <- gsub(x=paste0(OUTPUT.F, "/GENOMEPLOT/"), pattern='//', replacement='/')
+  TSV.F <- gsub(x=paste0(OUTPUT.F, "/TSV/"), pattern='//', replacement='/')
+
+  PEAKC.F <- gsub(x=paste0(OUTPUT.F, "/PEAKC/"), pattern='//', replacement='/')
+
+  logDirs <- list()
+
+  ##To do: replace ifelse for if statement or give FALSE statement...
+  logDirs$outFolder <- ifelse(!dir.exists(OUTPUT.F), dir.create(OUTPUT.F), FALSE)
+  logDirs$logFolder <- ifelse(!dir.exists(LOG.F), dir.create(LOG.F), FALSE)
+  logDirs$fastqFolder <- ifelse(!dir.exists(FASTQ.demux.F), dir.create(FASTQ.demux.F), FALSE)
+  logDirs$trimFolder <- ifelse(!dir.exists(TRIM.F), dir.create(TRIM.F), FALSE)
+  logDirs$bamFolder <- ifelse(!dir.exists(BAM.F), dir.create(BAM.F), FALSE)
+  logDirs$rdsFolder <- ifelse(!dir.exists(RDS.F), dir.create(RDS.F), FALSE)
+  logDirs$rdsbinFolder <- ifelse(!dir.exists(RDS.BIN.F), dir.create(RDS.BIN.F), FALSE)
+
+  # Extract experiments from VPinfo, remove weird characters and save in output folder. 
+  message(paste0("\n------ Reading the VP info file: ", VPinfo.file))
+  VPinfo <- Read.VPinfo(VPinfo.file)
+  if (is.null(VPinfo)){
+    stop("viewpoint info file (vpFile) not correct.")
+  }
+  write.table(VPinfo, paste0(OUTPUT.F, "/VPinfo.txt"), sep="\t", row.names=FALSE, quote=F)
+
+  if (make.cisplot == TRUE){
+    logDirs$plotFolder <- ifelse(!dir.exists(PLOT.F), dir.create(PLOT.F), FALSE)
+  }
+  if (make.wig == TRUE){
+    logDirs$wigFolder <- ifelse(!dir.exists(WIG.F), dir.create(WIG.F), FALSE)
+  }
+  if(any(VPinfo$analysis == 'all') & make.gwplot){
+    logDirs$genomeplotFolder <- ifelse(!dir.exists(GENOMEPLOT.F), dir.create(GENOMEPLOT.F), FALSE)
+  }
+  if (tsv == TRUE){
+    logDirs$tsvFolder <- ifelse(!dir.exists(TSV.F), dir.create(TSV.F), FALSE)
+  }
+  if (peakC == TRUE){
+    logDirs$peakcFolder <- ifelse(!dir.exists(PEAKC.F), dir.create(PEAKC.F), FALSE)
+  }
+
+  # Make Log files
+  LOGNAME <- format(Sys.time(), '%Y_%m_%d__%H_%M_%S')
+  log.path <- paste0(LOG.F, "Log_", LOGNAME, ".txt")
+  demux.log.path <- paste0(LOG.F, "Log_demux_", LOGNAME, ".txt")
+  trim.log.path <- paste0(LOG.F, "Log_4Ctrim_", LOGNAME, ".txt")
+  bowtie.log.path <- paste0(LOG.F, "Bowtie2Log_", LOGNAME, ".txt")
+
+  # Save Run parameters to logfile
+  run.par <- data.frame(
+    param=c("pipeline.version", "baseFolder", "VPinfo.file", "FASTQ.F", "OUTPUT.F", "cutoff", "trim.length"
+      , "reads.quality", "map.unique", "wSize", "nTop", "make.wig", "make.cisplot", "make.gwplot", "nThreads"
+      , "normFactor", "nonBlind", "tsv","bins", "mmMax", "peakC", "replicates"),
+    value=c(configuration$pipeline.version, configuration$baseFolder, VPinfo.file, FASTQ.F, OUTPUT.F, cutoff, trim.length,
+      reads.quality, map.unique, wSize, nTop, make.wig, make.cisplot, make.gwplot, nThreads,normFactor,
+      nonBlind, tsv,bins, mmMax, peakC, replicates)
+    )
+
+  write.table(run.par, log.path, quote=FALSE, col.names=FALSE, row.names=FALSE, append=TRUE)
+
+  #1. demux.FASTQ
+  #Demultiplex all fastq files and write in FASTQ folder in OUTPUT.F
+  message("\n------ Demultiplexing Fastq files based on VPinfo file")
+  demux.FASTQ(VPinfo=VPinfo, FASTQ.F=FASTQ.F, FASTQ.demux.F=FASTQ.demux.F, demux.log.path=demux.log.path, mmMax = mmMax)
+
+  #4C-seq analysis
+
+  exp.name <- as.character(VPinfo$expname)
+  primer <- as.character(VPinfo$primer)
+  genome <- as.character(VPinfo$genome)
+  firstenzyme <-as.character(VPinfo$firstenzyme)
+  secondenzyme <- as.character(VPinfo$secondenzyme)
+  vpChr <- as.character(VPinfo$vpchr)
+  vppos <- as.numeric(VPinfo$vppos)
+  analysis <- as.character(VPinfo$analysis)
+  condition <- as.factor(VPinfo$condition)
+  replicate <- as.factor(VPinfo$replicate)
+
+  message("\n------ 4Cseq analysis")
+
+  for (i in 1:length(exp.name)){
+
+    message(paste0(" +++ experiment: ", exp.name[i], " +++"))
+
+    #skip already generated files
+    rdsFile<-paste0(RDS.F, exp.name[i], ".rds")
+    if (file.exists(rdsFile)){
+      error.msg <- paste("         ### WARNING: rds file", exp.name[i], "already exist, skipping experiment.")
+      write(error.msg, log.path, append=TRUE)
+      message(error.msg)
+      next
+    }
+
+
+    primer.sequence <- primer[i]
+
+    file.fastq <- paste0(FASTQ.demux.F, exp.name[i], ".fastq.gz")
+    CHR <- paste0("chr", vpChr[i])
+
+    if (exp.name[i] %in% exp.name[duplicated(exp.name)]){
+      error.msg <- paste0("      ### ERROR: Experiment name not unique for ", exp.name[i])
+      write(error.msg, log.path, append=TRUE)
+      message(error.msg)
+      next
+    }
+
+    if (!(firstenzyme[i] %in% rownames(configuration$enzymes))){
+      error.msg <- paste0("      ### ERROR: firstcutter not found for ", exp.name[i])
+      write(error.msg, log.path, append=TRUE)
+      message(error.msg)
+      next
+    }
+
+    firstcutter <- configuration$enzyme[firstenzyme[i],]
+
+    if (!(secondenzyme[i] %in% rownames(configuration$enzymes))){
+      error.msg <- paste0("      ### ERROR: secondcutter not found for ", exp.name[i])
+      write(error.msg, log.path, append=TRUE)
+      message(error.msg)
+      next
+    }
+
+    secondcutter <- configuration$enzyme[secondenzyme[i],]
+
+    if (!(genome[i] %in% rownames(configuration$genomes))){
+      error.msg <- paste0("      ### ERROR: genome not found for ", exp.name[i])
+      write(error.msg, log.path, append=TRUE)
+      message(error.msg)
+      next
+    }
+
+    if (!(analysis[i] %in% c("cis", "all"))){
+      error.msg <- paste0("      ### ERROR: analysis of cis/all not found for ", exp.name[i])
+      write(error.msg, log.path, append=TRUE)
+      message(error.msg)
+      next
+    }
+
+    if (!file.exists(file.fastq)){
+      error.msg <- paste0("      ### ERROR:", exp.name[i], " FASTQ file does not exist")
+      write(error.msg, log.path, append=TRUE)
+      message(error.msg)
+      next
+    }
+
+    message("      >>> Trim of the fastq <<<")
+    trim.FASTQ <- trim.FASTQ(exp.name=exp.name[i], firstcutter=firstcutter, secondcutter=secondcutter, file.fastq=file.fastq, trim.F=TRIM.F, 
+      cutoff=cutoff, trim.length=trim.length, log.path=trim.log.path, min.amount.reads=min.amount.reads)
+
+    txt.tmp <- paste0(TRIM.F, exp.name[i], ".txt")
+    if (!file.exists(txt.tmp)){
+      error.msg <- paste0("         ### ERROR:", exp.name[i], " trimmed file not found")
+      write(error.msg, log.path, append=TRUE)
+      message(error.msg)
+      next
+    }
+
+    captureLen <- trim.FASTQ$captureLen
+
+    if (captureLen<=nchar(firstcutter)){
+      error.msg <- paste0("         ### ERROR:", exp.name[i], " capture length <= length firstcutter motif.")
+      message("         ### Skipping experiment.")
+      write(error.msg, log.path, append=TRUE)
+      message(error.msg)
+      next
+    }
+
+    nReads <- trim.FASTQ$nReads
+    motifPosperc <-trim.FASTQ$motifPosperc
+    readlenperc <- trim.FASTQ$readlenperc
+
+
+
+
+    # 3. make BAM files
+
+    message("      >>> Alignment of reads to reference genome <<<")
+    bamFile <- paste0(BAM.F, exp.name[i], ".bam")
+    if (!file.exists(bamFile)){
+    #Original
+    #makeBAM(exp.name=exp.name[i], BAM.F=BAM.F, NCORES=nThreads, Bowtie2Folder=configuration$bt2Genomes[genome[i],], genome=genome[i], txt.tmp=txt.tmp, log.path=log.path, bowtie.log.path=bowtie.log.path, bamFile=bamFile, map.unique=map.unique, readsQual=reads.quality)
+    makeBAM(exp.name=exp.name[i], BAM.F=BAM.F, NCORES=nThreads, Bowtie2Folder=configuration$bt2Genomes[genome[i],], genome="GRCh37p13_primaryAssembly_chrFormat", 
+      txt.tmp=txt.tmp, log.path=log.path, bowtie.log.path=bowtie.log.path, bamFile=bamFile, map.unique=map.unique, readsQual=reads.quality)
+    } else {
+      error.msg <- paste("         ### WARNING:", exp.name[i], "BAM file already exist, continuing with exisiting file.")
+      write(error.msg, log.path, append=TRUE)
+      message(error.msg)
+    }
+
+    mappedReads <- readGAlignments(file=bamFile, index=bamFile)
+
+
+    # To do: lock frag map
+    #exec 3>hg19_Dpn2_Csp6I # open a file handle; this part will always succeed
+    #flock -x 3      # lock the file handle; this part will block
+    #To release the lock:
+    #exec 3>&-       # close the file handle
+
+
+
+    message(paste0("      >>> Create frag map for genome:", genome[i], " with RE1:", firstcutter, "and RE2:", secondcutter, " and capture length:", captureLen, " <<<"))
+    frags <- getFragMap(
+      vpChr_FragMap=NULL
+      ,firstcutter_FragMap=firstcutter
+      ,secondcutter_FragMap=secondcutter
+      ,genome_FragMap=genome[i]
+      ,captureLen_FragMap=captureLen
+      ,nThreads_FragMap=nThreads
+      ,baseFolder_FragMap=configuration$baseFolder
+      ,Bowtie2Folder=configuration$bt2Genomes[genome[i],]
+      ,config_genomes=configuration$genomes,
+      chr_random=chr_random, chrUn=chrUn, chrM = chrM)
+
+
+    message("      >>> Align reads to fragments <<<")
+    readsAln <- alignToFragends(
+      gAlign=mappedReads, 
+      fragments=frags,
+      firstcut=firstcutter)
+
+    message("      >>> Compute statistics and create report <<<")
+    reportAnalysis <- createReport(allReads=readsAln
+      , mapReads=mappedReads
+      , demuxReads=nReads
+      , chromosome=CHR
+      , vpPos=vppos[i]
+      , normFactor=normFactor
+      , wSize=wSize
+      , nTop=nTop
+      , motifPosperc=motifPosperc
+      , readlenperc=readlenperc)
+
+    vpInfo <- data.frame(
+      name=exp.name[i]
+      , Fastq=file.fastq
+      , primer=primer.sequence
+      , genome=genome[i]
+      , firstcutter=firstcutter
+      , secondcutter=secondcutter
+      , chr=CHR
+      , pos=vppos[i]
+      , captureLen=captureLen
+      , date=Sys.time()
+      , Pipeline=configuration$pipeline.version)
+
+
+    #Extract Cis reads.
+    message("      >>> Compute normalized 4C score per fragment <<<")
+
+    rdsFile<-paste0(RDS.F, exp.name[i], ".rds")
+    if (file.exists(rdsFile)){
+      error.msg <- paste("         ### WARNING: rds file", exp.name[i], "already exist, overwriting exisiting file.")
+      write(error.msg, log.path, append=TRUE)
+      message(error.msg)
+    }
+
+    if (analysis[i] == "cis" | make.cisplot == TRUE){
+      reads.cis <- norm4C(readsGR=readsAln[as.vector(seqnames(readsAln)) == CHR], nReads=normFactor, wSize=wSize, nTop=nTop)
+
+      if (nonBlind){
+        reads.cis<-reads.cis[reads.cis$type=="non_blind"]
+      }
+    }
+
+    if (analysis[i] == "cis"){
+      saveRDS(list(reads=reads.cis, report=reportAnalysis, vpInfo=vpInfo), file=rdsFile)
+    }
+
+    if (analysis[i] == "all"){
+      #normalization all reads is used
+      reads.all <- norm4C(readsGR=readsAln, nReads=normFactor, wSize=wSize, nTop=nTop)
+    }
+
+    if (bins == TRUE | make.gwplot == TRUE){
+      if (analysis[i] == "all"){
+        message("      >>> Creating bins <<<")
+        bin.GR <- make.reads.and.bins(reads=reads.all, assemblyName=genome[i], res=configuration$binSize, config_genomes=configuration$genomes)
+        file.out <- paste0(RDS.BIN.F, exp.name[i], "_bin_res_", (configuration$binSize/1e3), "kb.rds")
+        saveRDS(object=list(reads=bin.GR$reads, bins=bin.GR$bins, report=reportAnalysis, vpInfo=vpInfo), file=file.out, compress=TRUE)
+      }
+    }
+
+    if (analysis[i] == "all"){
+      if (nonBlind){
+        reads.all<-reads.all[reads.all$type=="non_blind"]
+      }
+      saveRDS(list(reads=reads.all, report=reportAnalysis, vpInfo=vpInfo), file=rdsFile)
+    }
+
+    if (make.cisplot == TRUE){
+      message("      >>> Creating local 4C Plot <<<")
+      createPlot(
+        plotTitle=exp.name[i]
+        , vpPos=vppos[i]
+        , chromosome=CHR
+        , fragGR=reads.cis
+        , plotLegend=reportAnalysis
+        , plotView=configuration$plotView
+        , maxY=configuration$maxY
+        , minY=0
+        , xaxisUnit=configuration$xaxisUnit
+        , plotRegion='cis'
+        , foldOut=PLOT.F
+        , plotType=configuration$plotType
+        )
+    }
+
+    if (analysis[i]=="all" & make.gwplot == TRUE){
+      message("      >>> Creating genome-wide 4C coverage Plot <<<")
+      createPlot(
+        plotTitle=exp.name[i]
+        , vpPos=vppos[i]
+        , chromosome=CHR
+        , fragGR=bin.GR
+        , plotLegend=reportAnalysis
+        , plotView=configuration$plotView
+        , maxY=configuration$maxY
+        , minY=0
+        , xaxisUnit=configuration$xaxisUnit
+        , plotRegion='all'
+        , foldOut=GENOMEPLOT.F
+        , plotType=configuration$plotType
+        )
+
+    }
+
+    #7. make WIG
+    if (make.wig == TRUE){
+      message("      >>> Create WIG file <<<")
+
+      if (nonBlind){
+        wigFile <- paste0(WIG.F, exp.name[i], "_nonblind_WIN",wSize,".wig")
+      }else{
+        wigFile <- paste0(WIG.F, exp.name[i],"_WIN",wSize ,".wig")
+      }
+
+      if (file.exists(wigFile)){
+        error.msg <- paste("         ### WARNING:", exp.name[i], "WIG file already exist.")
+        message(error.msg)
+        write(error.msg, log.path, append=TRUE)
+      } else {
+        if (analysis[i] == "cis"){
+          reads.wig <- reads.cis[order(reads.cis$pos)]
+        }else{
+          reads.wig <- reads.all[order(seqnames(reads.all),reads.all$pos)]
+        }
+        exportWig(gR=reads.wig, expName=exp.name[i], filename=wigFile, vpPos=vppos[i], vpChr=CHR, plotView=configuration$plotView)
+      }
+    }
+
+    if (tsv == TRUE){
+      message("      >>> Create TSV file <<<")
+
+      if (nonBlind){
+        tsvFile <- paste0(TSV.F, exp.name[i], "_nonblind_WIN",wSize,".tsv")
+      }else{
+        tsvFile <- paste0(TSV.F, exp.name[i],"_WIN",wSize ,".tsv")
+      }
+
+
+
+      if (file.exists(tsvFile)){
+        error.msg <- paste("         ### WARNING:", exp.name[i], "TSV file already exist.")
+        message(error.msg)
+        write(error.msg, log.path, append=TRUE)
+      } else {
+        if (analysis[i] == "cis"){
+          reads.tsv <- reads.cis[order(reads.cis$pos)]
+        }else{
+          reads.tsv <- reads.all[order(seqnames(reads.all),reads.all$pos)]
+        }
+
+        gzname<- paste0(tsvFile, ".gz")
+        gz1 <- gzfile(gzname, "w")
+        tsvdat <- data.frame(chr=seqnames(reads.tsv)
+          ,start=start(reads.tsv)
+          ,end=end(reads.tsv)
+          ,pos=reads.tsv$pos
+          ,type=reads.tsv$type
+          ,fe_strand=reads.tsv$fe_strand
+          ,fe_id=reads.tsv$fe_id
+          ,reads=reads.tsv$reads
+          ,normReads=reads.tsv$normReads
+          ,norm4C=reads.tsv$norm4C)
+
+        write.table(tsvdat, file=gz1, append=FALSE, sep="\t", quote=FALSE, row.names=FALSE, col.names=TRUE)
+      }
+      close(gz1)
+    }
+
+    # Save R image
+    if (rImage == TRUE){
+      save.image(paste0(R.IMAGE, "image_R", exp.name[i], ".Rdata"))
+    }
+    message('\n')
+  }
+
+  #make report from all RDS files
+  message("------ Writing final report\n")
+  export.report(RDS.F, OUTPUT.F)
 }
