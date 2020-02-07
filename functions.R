@@ -69,6 +69,10 @@ Read.VPinfo <- function(VPinfo.file){
 	if (ncol(VPinfo)==9){
 		defaultNames<-c('expname', 'primer', 'firstenzyme', 'secondenzyme', 'genome', 'vpchr', 'vppos', 'analysis', 'fastq')
 		headerCount <- sum(colnames(VPinfo) %in% defaultNames)
+		if (replicates == TRUE){
+			message("Replicates option activated! Condition and replicate column are required.")
+			return()
+		}
 	}
 
 	if (ncol(VPinfo)==11){
@@ -78,7 +82,11 @@ Read.VPinfo <- function(VPinfo.file){
 	
 	if (ncol(VPinfo)==10){
 		defaultNames<-c('expname', 'spacer', 'primer', 'firstenzyme', 'secondenzyme', 'genome', 'vpchr', 'vppos', 'analysis', 'fastq')
-		headerCount <- sum(colnames(VPinfo) %in% defaultNames) 
+		headerCount <- sum(colnames(VPinfo) %in% defaultNames)
+		if (replicates == TRUE){
+			message("Replicates option activated! Condition and replicate column are required.")
+			return()
+		}
 	}
 
 	if (ncol(VPinfo)==12){
@@ -88,11 +96,33 @@ Read.VPinfo <- function(VPinfo.file){
 
 	
 	if (headerCount < ncol(VPinfo)){
-		message("Header not correct in VPinfo file.")
+		message("Headers not correct in VPinfo file.")
 		return()
 	}
 	
+	# Modification of duplicated exp.name depending of condition and replicate
+	if (replicates == TRUE){
+		while (any(duplicated(VPinfo$expname)) == TRUE){
+			dupName <- VPinfo$expname[which(duplicated(VPinfo$expname) == TRUE)[1]]
+			dupVPinfo <- VPinfo[VPinfo$expname == dupName,]
+			identicalRows <- rownames(dupVPinfo)
+			if (length(unique(dupVPinfo$vpchr)) != 1 || length(unique(dupVPinfo$vppos)) != 1){
+				message("Some duplicated exp.names do not present the same viewpoint (vpchr or vppos).")
+				return()
+			}
 
+			for (i in identicalRows){
+				newName = paste0(dupVPinfo$expname[rownames(dupVPinfo) == i], "_", dupVPinfo$condition[rownames(dupVPinfo) == i], "_Rep", dupVPinfo$replicate[rownames(dupVPinfo) == i])
+				dupVPinfo$expname[rownames(dupVPinfo) == i] <- newName
+				if (newName %in% unique(dupVPinfo$expname[duplicated(dupVPinfo$expname)])){ 
+					message("Some duplicated exp.names present the same condition and replicate.")
+					return()
+				} else {
+					VPinfo$expname[rownames(VPinfo) == i] <- newName
+				}
+			}
+		}
+	}
 
 	expname <- as.character(gsub("[^A-Za-z0-9_]", "", VPinfo$expname))
 	primer <-   toupper(as.character(gsub("[^A-Za-z]", "", VPinfo$primer)))
@@ -1065,11 +1095,13 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 	RDS.BIN.F <- gsub(x=paste0(OUTPUT.F, "/RDS-BIN/"), pattern='//', replacement='/')
 	PLOT.F <- gsub(x=paste0(OUTPUT.F, "/PLOT/"), pattern='//', replacement='/')
 	WIG.F <- gsub(x=paste0(OUTPUT.F, "/WIG/"), pattern='//', replacement='/')
+	WIG.MERGE.F <- gsub(x=paste0(OUTPUT.F, "/WIG/MergeWIG/"), pattern='//', replacement='/')
 	GENOMEPLOT.F <- gsub(x=paste0(OUTPUT.F, "/GENOMEPLOT/"), pattern='//', replacement='/')
 	TSV.F <- gsub(x=paste0(OUTPUT.F, "/TSV/"), pattern='//', replacement='/')
+	TSV.MERGE.F <- gsub(x=paste0(OUTPUT.F, "/TSV/MergeTSV/"), pattern='//', replacement='/')
 
 	PEAKC.F <- gsub(x=paste0(OUTPUT.F, "/PEAKC/"), pattern='//', replacement='/')
-	PEAKC.PLOTS.F <- gsub(x=paste0(OUTPUT.F, "/PEAKC/Plots"), pattern='//', replacement='/')
+	PEAKC.PLOTS.F <- gsub(x=paste0(OUTPUT.F, "/PEAKC/Plots/"), pattern='//', replacement='/')
 
 	logDirs <- list()
 
@@ -1095,12 +1127,18 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 	}
 	if (make.wig == TRUE){
 		logDirs$wigFolder <- ifelse(!dir.exists(WIG.F), dir.create(WIG.F), FALSE)
+		if(replicates == TRUE){
+			logDirs$wigMergeFolder <- ifelse(!dir.exists(WIG.MERGE.F), dir.create(WIG.MERGE.F), FALSE)
+		}
 	}
 	if(any(VPinfo$analysis == 'all') & make.gwplot){
 		logDirs$genomeplotFolder <- ifelse(!dir.exists(GENOMEPLOT.F), dir.create(GENOMEPLOT.F), FALSE)
 	}
 	if (tsv == TRUE){
 		logDirs$tsvFolder <- ifelse(!dir.exists(TSV.F), dir.create(TSV.F), FALSE)
+		if(replicates == TRUE){
+			logDirs$tsvMergeFolder <- ifelse(!dir.exists(TSV.MERGE.F), dir.create(TSV.MERGE.F), FALSE)
+		}
 	}
 	if (peakC == TRUE){
 		logDirs$peakcFolder <- ifelse(!dir.exists(PEAKC.F), dir.create(PEAKC.F), FALSE)
@@ -1400,7 +1438,7 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 		# PeakC analysis
 		if (peakC == TRUE){
 			message("      >>> PeakC analysis <<<")
-			bedFile = paste0(OUTPUT.F, PEAKC.F, exp.name[i],"peakC_peaks.bed")
+			bedFile = paste0(PEAKC.F, exp.name[i],"_peakC_peaks.bed")
 
 			if (file.exists(bedFile)){
 				error.msg <- paste("         ### WARNING: ", exp.name[i], " peakC analysis already exist.")
@@ -1429,7 +1467,7 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 					resPeakC$exportPeakGR <- NULL
 				}
 
-				plotFile = paste0(OUTPUT.F,PEAKC.PLOTS.F,"peakC_", exp.name[i],".pdf")
+				plotFile = paste0(PEAKC.PLOTS.F,"peakC_", exp.name[i],".pdf")
 				pdf(file=plotFile)
 				plot_C(data=resPeakC, num.exp = 1, y.min = 0, y.max = 750)
 				dev.off()
@@ -1441,10 +1479,18 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 	}
 
 
-	if(peakC == TRUE & replicates == TRUE){
+	if(replicates == TRUE){
 		message("\n------ Fusion replicates")
 
 
+
+
+
+
+		if (peakC == TRUE){
+
+
+		}
 
 
 
