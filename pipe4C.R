@@ -37,6 +37,7 @@ option_list = list(
 							help="path to the output folder [required]", metavar="/path/to/output_folder/"),
 	make_option(c("-c", "--confFile"), type="character", default="conf.yml", 
 							help="path to configuration file [default %default]", metavar="/path/to/conf.yml/"),
+
 	
 	make_option(c("-d", "--mismatchMax"), type="integer", default=NULL,
 							help="Maximum number of mismatches allowed with primer sequence during demultiplexing.",metavar="number"),  
@@ -65,15 +66,21 @@ option_list = list(
 							help="qWr for the peakC analysis.",metavar="number"),
 	make_option(c("-md", "--minDist"), type="integer", default=NULL,
 							help="minDist for the peakC analysis.",metavar="number"),
-	make_option(c("-mg", "--min.gapwidth"), type="integer", default=NULL,
-							help="min.gapwidth for the peakC analysis.",metavar="number"),
+	make_option(c("-fs", "--fixedStepWigBin"), type="integer", default=NULL,
+							help="bin to use to write the fixedStep Wig file.",metavar="number"),
+
 
 	make_option(c("-u", "--mapUnique"), action="store_true", default=FALSE,
 							help="Extract uniquely mapped reads, based on the lack of XS tag."),
 	make_option(c("-nb", "--nonBlind"), action="store_true", default=FALSE,
 							help="Only keep non-blind fragments"),
+	make_option(c("-bdg", "--bdg"), action="store_true", default=FALSE,
+							help="create bedGraph files for all samples"),	
 	make_option(c("-w", "--wig"), action="store_true", default=FALSE,
 							help="create wig files for all samples"),
+	make_option(c("-wf", "--fixedStepWig"), action="store_true", default=FALSE,
+							help="create fixedStepWig files for all samples"),
+	
 	make_option(c("-p", "--plot"), action="store_true", default=FALSE,
 							help="Create viewpoint coverage plot for all samples."),
 	make_option(c("-g", "--genomePlot"), action="store_true", default=FALSE,
@@ -88,7 +95,6 @@ option_list = list(
 							help="chrUn is in bowtie2 index genome."),
 	make_option(c("-chrM", "--chrM"), action="store_true", default=FALSE,
 							help="chrM is in bowtie2 index genome."),
-
 
 	make_option(c("-pe", "--peakC"), action="store_true", default=FALSE, 
 							help="Perform peakC analysis."),
@@ -128,6 +134,7 @@ if(!suppressMessages(require("GenomicRanges", character.only=TRUE))) stop("Packa
 if(!suppressMessages(require("GenomicAlignments", character.only=TRUE))) stop("Package not found: GenomicAlignments")
 if(!suppressMessages(require("caTools", character.only=TRUE))) stop("Package not found: caTools")
 if(!suppressMessages(require("config", character.only=TRUE))) stop("Package not found: config")
+if(!suppressMessages(require("rtracklayer", character.only=TRUE))) stop("Package not found: rtracklayer")
 if(!suppressMessages(require("peakC", character.only=TRUE))) stop("Package not found: peakC")
 
 source(sub(pattern='pipe4C\\.R', replacement='functions\\.R', x=get_script_path()))
@@ -180,8 +187,8 @@ if (!is.null(argsL$qWr)){
 if (!is.null(argsL$minDist)){
 	configOpt$minDist<-argsL$minDist
 }
-if (!is.null(argsL$min.gapwidth)){
-	configOpt$min.gapwidth<-argsL$min.gapwidth
+if (!is.null(argsL$fixedStepWigBin)){
+	configOpt$fixedStepWigBin<-argsL$fixedStepWigBin
 }
 
 
@@ -191,8 +198,14 @@ if (argsL$mapUnique){
 if (argsL$nonBlind){
 	configOpt$nonBlind<-argsL$nonBlind
 }
+if (argsL$bdg){
+	configOpt$bdg<-argsL$bdg
+}
 if (argsL$wig){
 	configOpt$wig<-argsL$wig
+}
+if (argsL$fixedStepWig){
+	configOpt$fixedStepWig<-argsL$fixedStepWig
 }
 if (argsL$plot){
 	configOpt$cisplot<-argsL$plot
@@ -224,18 +237,22 @@ if (argsL$replicates){
 }
 
 #Check whether Bowtie2 and samtools are installed...
-message("\n------ Checking the version of bowtie2: ")
-b <- as.numeric(system("bowtie2 --version && echo $?"))
-# if bowtie2 is not installed b == 127
-if (b != 0){
-	stop("Bowtie2 is not installed!\n")
+message("\n------ Checking the version of bowtie2:\n")
+b <- suppressWarnings(system("command -v bowtie2 >/dev/null"))
+# if bowtie2 is not installed b = 127
+if (b == 0){
+	system("bowtie2 --version")
+} else {
+	stop("Bowtie2 is not installed!\n")	
 }
 
-message("\n------ Checking the version of samtools: ")
-s <- as.numeric(system("samtools --version && echo $?"))
-# if bowtie2 is not installed b == 127
-if (s != 0){
-	stop("Samtools is not installed!\n")
+message("\n------ Checking the version of samtools:\n")
+s <- suppressWarnings(system("command -v samtools >/dev/null"))
+# if Samtools is not installed s = 127
+if (s == 0){
+	system("samtools --version")
+} else {
+	stop("samtools is not installed!\n")	
 }
 
 
