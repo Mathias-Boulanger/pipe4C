@@ -16,7 +16,7 @@ default:
   fixedStepWigBin : 50
   cisplot : TRUE
   genomePlot : TRUE
-  tsv : TRUE
+  tsv : FALSE
   bins : TRUE
   mismatchMax : 2
   chr_random : FALSE
@@ -86,4 +86,7 @@ default:
     qWd: 1.5
     qWr: 1
     minDist: 15000
+    min.gapwidth : 5000
+    DESeq2 : TRUE
+    ctrl : DMSO
   
