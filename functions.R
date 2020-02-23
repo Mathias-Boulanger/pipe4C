@@ -1711,7 +1711,6 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 			createPlot(plotTitle=exp.name[i], vpPos=vppos[i], chromosome=CHR, fragGR=bin.GR, plotLegend=reportAnalysis, plotView=configuration$plotView,
 				maxY=configuration$maxY, minY=0, xaxisUnit=configuration$xaxisUnit, plotRegion='all', foldOut=GENOMEPLOT.F, plotType=configuration$plotType)
 		}
-		rm(reportAnalysis)
 
 		#Export data
 		if (make.bdg == TRUE){
