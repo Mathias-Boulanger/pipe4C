@@ -41,6 +41,9 @@ createConfig <- function(confFile=argsL$confFile){
 	qWd = configF$PeakC$qWd
 	qWr = configF$PeakC$qWr
 	minDist = configF$PeakC$minDist
+	min.gapwidth = configF$PeakC$min.gapwidth
+	DESeq2 = configF$PeakC$DESeq2
+	ctrl = configF$PeakC$ctrl
 	
 	enzymes <- data.frame(
 		name=as.character(sapply(configF$enzymes, function(x) strsplit(x, split=' ')[[1]][1])),
@@ -60,26 +63,16 @@ createConfig <- function(confFile=argsL$confFile){
 	return(list(baseFolder=baseFolder, normFactor=normFactor, enzymes=enzymes, genomes=genomes, bt2Genomes=bt2Genomes, plotView=plotView,
 		maxY=maxY, xaxisUnit=xaxisUnit,	plotType=plotType, binSize=binSize,	qualityCutoff=qualityCutoff, trimLength=trimLength, minAmountReads=minAmountReads,
 		readsQuality=readsQuality, cores=cores, wSize=wSize, nTop=nTop, mapUnique=mapUnique, nonBlind=nonBlind, bdg=bdg, wig=wig, fixedStepWig=fixedStepWig,
-		fixedStepWigBin=fixedStepWigBin, cisplot=cisplot, genomePlot=genomePlot, tsv=tsv, bins=bins, mmMax=mmMax, chr_random=chr_random, chrUn=chrUn, 
-		chrM=chrM, peakC=peakC, replicates=replicates, vpRegion=vpRegion, alphaFDR=alphaFDR, qWd=qWd, qWr=qWr, minDist=minDist))
+		fixedStepWigBin=fixedStepWigBin, cisplot=cisplot, genomePlot=genomePlot, tsv=tsv, bins=bins, mmMax=mmMax, chr_random=chr_random, chrUn=chrUn, chrM=chrM,
+		peakC=peakC, replicates=replicates, vpRegion=vpRegion, alphaFDR=alphaFDR, qWd=qWd, qWr=qWr, minDist=minDist, min.gapwidth=min.gapwidth, DESeq2=DESeq2, ctrl=ctrl))
 }
 
-Read.VPinfo <- function(VPinfo.file){
+Read.VPinfo <- function(VPinfo.file, replicates){
 	#Indentify Fastq files, experiment names and primer sequence from VPinfo file
 	VPinfo <- read.table(VPinfo.file, sep="\t", stringsAsFactors=FALSE, header=TRUE)
 
-	if (ncol(VPinfo)==9){
-		defaultNames<-c('expname', 'primer', 'firstenzyme', 'secondenzyme', 'genome', 'vpchr', 'vppos', 'analysis', 'fastq')
-		headerCount <- sum(colnames(VPinfo) %in% defaultNames)
-		if (replicates == TRUE){
-			message("Replicates option activated! Condition and replicate column are required.")
-			return()
-		}
-	}
-
-	if (ncol(VPinfo)==11){
-		defaultNames<-c('expname','primer', 'firstenzyme', 'secondenzyme', 'genome', 'vpchr', 'vppos', 'analysis', 'fastq', 'condition', 'replicate')
-		headerCount <- sum(colnames(VPinfo) %in% defaultNames) 
+	if (! "spacer" %in% colnames(VPinfo)){
+		VPinfo$spacer<-0
 	}
 	
 	if (ncol(VPinfo)==10){
@@ -107,13 +100,13 @@ Read.VPinfo <- function(VPinfo.file){
 		while (any(duplicated(VPinfo$expname)) == TRUE){
 			dupName <- VPinfo$expname[which(duplicated(VPinfo$expname) == TRUE)[1]]
 			dupVPinfo <- VPinfo[VPinfo$expname == dupName,]
-			identicalRows <- rownames(dupVPinfo)
+			identicalNameRows <- rownames(dupVPinfo)
 			if (length(unique(dupVPinfo$vpchr)) != 1 || length(unique(dupVPinfo$vppos)) != 1){
 				message("Some duplicated exp.names do not present the same viewpoint (vpchr or vppos).")
 				return()
 			}
 
-			for (i in identicalRows){
+			for (i in identicalNameRows){
 				newName = paste0(dupVPinfo$expname[rownames(dupVPinfo) == i], "_", dupVPinfo$condition[rownames(dupVPinfo) == i], "_Rep", dupVPinfo$replicate[rownames(dupVPinfo) == i])
 				dupVPinfo$expname[rownames(dupVPinfo) == i] <- newName
 				if (newName %in% unique(dupVPinfo$expname[duplicated(dupVPinfo$expname)])){ 
@@ -145,15 +138,12 @@ Read.VPinfo <- function(VPinfo.file){
 	
 	analysis <- as.character(gsub("[^a-z]", "", VPinfo$analysis))
 	fastq <- as.character(VPinfo$fastq)
-	
-	if (ncol(VPinfo)==9 | ncol(VPinfo)==11){
-		VPinfo$spacer<-0
-	}
-	if (ncol(VPinfo)==9 | ncol(VPinfo)==10){
+	spacer <- as.numeric(gsub("\\D+", "", VPinfo$spacer))
+
+	if (ncol(VPinfo)==10){
 		VPinfo$condition<-NA
 		VPinfo$replicate<-1
 	}
-	spacer <- as.numeric(gsub("\\D+", "", VPinfo$spacer))
 	condition <- as.character(gsub("[^A-Za-z0-9_]", "", VPinfo$condition))
 
 	if(is.numeric(VPinfo$replicate)){
@@ -170,134 +160,135 @@ Read.VPinfo <- function(VPinfo.file){
 
 demux.FASTQ <- function(VPinfo, FASTQ.F, FASTQ.demux.F, demux.log.path, overwrite = FALSE, mmMax){
 	# reading functions
-	if (!require("ShortRead", character.only = TRUE)) stop("Package not found: ShortRead")
+	if(!suppressMessages(require("ShortRead", character.only=TRUE))) stop("Package not found: ShortRead")
 		
-		# Demultiplex FastQ files: 
-		# 1.  This will remove weird charactes from VPinfo name and primer info.
-		# 2.  Exclude experiments that have non-unique names
-		# 3.  Demultiplex each Fastq file and save it as a new Fastq file which can be uploaded to GEO.
-		# If a spacer sequence is used with random nucleotids before the primer, the spacer option should be set.
+	# Demultiplex FastQ files: 
+	# 1.  This will remove weird characters from VPinfo name and primer info.
+	# 2.  Exclude experiments that have non-unique names
+	# 3.  Demultiplex each Fastq file and save it as a new Fastq file which can be uploaded to GEO.
+	# If a spacer sequence is used with random nucleotides before the primer, the spacer option should be set.
 
-		#Demultiplex per FASTQ file
+	#Demultiplex per FASTQ file
 
-		file.fastq <- sort(unique(VPinfo$fastq))
-		for (i in 1:length(file.fastq)){
-			VPinfo.fastq <- VPinfo[VPinfo$fastq == file.fastq[i],]
+	file.fastq <- sort(unique(VPinfo$fastq))
+	for (i in 1:length(file.fastq)){
+		VPinfo.fastq <- VPinfo[VPinfo$fastq == file.fastq[i],]
 
-			# Remove weird characters from VPinfo file
-			exp.name.all <- as.character(VPinfo$expname)
-			exp.name <- as.character(VPinfo.fastq$expname)
-			primer <- toupper(as.character(VPinfo.fastq$primer))
-			spacer <- as.numeric(VPinfo.fastq$spacer)
+		# Remove weird characters from VPinfo file
+		exp.name.all <- as.character(VPinfo$expname)
+		exp.name <- as.character(VPinfo.fastq$expname)
+		primer <- toupper(as.character(VPinfo.fastq$primer))
+		spacer <- as.numeric(VPinfo.fastq$spacer)
 
-			# Remove experiments with duplicated names
-			exp.name.unique <- NULL
-			primer.unique <- NULL
-			spacer.unique <- NULL
-			for (a in 1:length(exp.name)){
-				if (exp.name[a] %in% exp.name.all[duplicated(exp.name.all)]){
-					error.msg <- paste("      ### ERROR: Experiment name not unique for ", exp.name[a])
-					message(error.msg)
-					write(error.msg, demux.log.path, append = TRUE)
-				} else {
-					exp.name.unique <- c(exp.name.unique, exp.name[a])
-					primer.unique <- c(primer.unique, primer[a])
-					spacer.unique <- c(spacer.unique, spacer[a])
-				}
+		# Remove experiments with duplicated names
+		exp.name.unique <- NULL
+		primer.unique <- NULL
+		spacer.unique <- NULL
+		for (a in 1:length(exp.name)){
+			if (exp.name[a] %in% exp.name.all[duplicated(exp.name.all)]){
+				error.msg <- paste("      ### ERROR: Experiment name not unique for ", exp.name[a])
+				message(error.msg)
+				write(error.msg, demux.log.path, append = TRUE)
+			} else {
+				exp.name.unique <- c(exp.name.unique, exp.name[a])
+				primer.unique <- c(primer.unique, primer[a])
+				spacer.unique <- c(spacer.unique, spacer[a])
 			}
-			fq.df <- data.frame()
-			for (b in 1:length(exp.name.unique)){
-				outfile <- paste0(FASTQ.demux.F, exp.name.unique[b], ".fastq.gz")
-				if (any(file.exists(outfile))){
-					if (overwrite == TRUE){
-						unlink(outfile)
-						error.msg <- paste("      ### WARNING: File", outfile, "exists and will be overwritten.")
-						write(error.msg, demux.log.path, append = TRUE)
-						message(error.msg)
-						newrow <- data.frame(exp.name = exp.name.unique[b], primer = primer.unique[b], spacer = spacer.unique[b])
-						fq.df <- rbind(fq.df, newrow)
-					} else {
-						message(paste("      ### WARNING: File", outfile, "exists. continuing with exisiting file."))
-					}
-				} else {
+		}
+		fq.df <- data.frame()
+		for (b in 1:length(exp.name.unique)){
+			outfile <- paste0(FASTQ.demux.F, exp.name.unique[b], ".fastq.gz")
+			if (file.exists(outfile)){
+				if (overwrite == TRUE){
+					unlink(outfile)
+					error.msg <- paste("      ### WARNING: File", outfile, "exists and will be overwritten.")
+					write(error.msg, demux.log.path, append = TRUE)
+					message(error.msg)
 					newrow <- data.frame(exp.name = exp.name.unique[b], primer = primer.unique[b], spacer = spacer.unique[b])
 					fq.df <- rbind(fq.df, newrow)
+				} else {
+					message(paste("      ### WARNING: File", outfile, "exists. continuing with existing file."))
 				}
+			} else {
+				newrow <- data.frame(exp.name = exp.name.unique[b], primer = primer.unique[b], spacer = spacer.unique[b])
+				fq.df <- rbind(fq.df, newrow)
 			}
-			
-			#Check whether primers has enough distance with maximum allowed mismatches.
-			#
-			#https://www.rdocumentation.org/packages/DescTools/versions/0.99.19/topics/StrDist
-			#The function computes the Hamming and the Levenshtein (edit) distance of two given strings (sequences).
-			#The Hamming distance between two vectors is the number mismatches between corresponding entries.
-			#In case of the Hamming distance the two strings must have the same length.
-			#
+		}
+		
+		#Check whether primers has enough distance with maximum allowed mismatches.
+		#
+		#https://www.rdocumentation.org/packages/DescTools/versions/0.99.19/topics/StrDist
+		#The function computes the Hamming and the Levenshtein (edit) distance of two given strings (sequences).
+		#The Hamming distance between two vectors is the number mismatches between corresponding entries.
+		#In case of the Hamming distance the two strings must have the same length.
+		#
 
-			if (nrow(fq.df)>1){
-				message("Check whether primer can be seperated")
-				primers.mm<-DNAStringSet(fq.df$primer)
-				names(primers.mm)<-fq.df$exp.name
+		if (nrow(fq.df)>1){
+			message("Check whether primer can be seperated")
+			primers.mm<-DNAStringSet(fq.df$primer)
+			names(primers.mm)<-fq.df$exp.name
 
-				for (c in seq_along(primers.mm)){
-					primers.mm2<-primers.mm[-c]
-					#dist <- srdistance(primers.mm2,primers.mm[c])[[1]]
-					dist <- srdistance(primers.mm2,primers.mm[c],method = "Hamming")[[1]]
+			for (c in seq_along(primers.mm)){
+				primers.mm2<-primers.mm[-c]
+				#dist <- srdistance(primers.mm2,primers.mm[c])[[1]]
+				dist <- srdistance(primers.mm2, primers.mm[c], method = "Hamming")[[1]]
 
-					#srdistanceFilter()
-					#http://manuals.bioinformatics.ucr.edu/home/ht-seq
+				#srdistanceFilter()
+				#http://manuals.bioinformatics.ucr.edu/home/ht-seq
 
-					if (min(dist)<= mmMax){
-						error.msg <- paste("      ### WARNING: primer sequence not unique for", fq.df$exp.name[c], "with", mmMax, "mismatches allowed.")
-						message(error.msg)
-						write(error.msg, demux.log.path, append = TRUE)
-						error.msg2 <- paste("      ### WARNING: primer overlaps with primer ", names(primers.mm2[dist<=mmMax]),"\n")
-						message(error.msg2)
-						write(error.msg2, demux.log.path, append = TRUE)
-					}
-				}
-			}
-
-			# Read FastQ
-			if (nrow(fq.df) > 0){
-				message(paste("      >>> Reading Fastq: ", file.fastq[i], " <<<"))
-				if (file.exists(paste0(FASTQ.F, "/", file.fastq[i]))){
-
-					# then we stream the fastq files at 1,000,000 reads each time (default)
-					stream <- FastqStreamer((paste0(FASTQ.F, "/", file.fastq[i])))
-					message(paste0("         ### ", fq.df$exp.name, " check for primer sequence ", fq.df$primer, 
-						" spacer:", fq.df$spacer, " max mismatch:", mmMax, "\n"))
-					while (length(fq <- yield(stream))){
-						for (i in 1:nrow(fq.df)){
-							primer.seq <- as.character(fq.df$primer[i])
-							spacer <- as.numeric(fq.df$spacer[i])
-							if (mmMax == 0){
-								demultiplex.primer = srFilter(function(x){
-									substr(sread(x), spacer + 1, spacer + nchar(primer.seq)) == primer.seq
-									}, name = "demultiplex.primer")
-								demux.fq <- fq[demultiplex.primer(fq)]
-							} else {
-								shortreads <- narrow(sread(fq), start = spacer + 1, end = spacer + nchar(primer.seq))
-								dist <- srdistance(shortreads, primer.seq, method = "Hamming")[[1]]
-								demux.fq <- fq[dist <= mmMax]
-							}
-							writeFastq(demux.fq, paste0(FASTQ.demux.F, fq.df$exp.name[i], ".fastq.gz"), mode = "a")
-						}
-					}
-					close(stream)
-				}else{
-					error.msg <- paste("      ### WARNING: File", file.fastq[i], " does not exist. Experiment skipped.")
-					write(error.msg, demux.log.path, append = TRUE)
+				if (min(dist)<= mmMax){
+					error.msg <- paste("      ### WARNING: primer sequence not unique for", fq.df$exp.name[c], "with", mmMax, "mismatches allowed.")
 					message(error.msg)
+					write(error.msg, demux.log.path, append = TRUE)
+					error.msg2 <- paste("      ### WARNING: primer overlaps with primer ", names(primers.mm2[dist<=mmMax]),"\n")
+					message(error.msg2)
+					write(error.msg2, demux.log.path, append = TRUE)
 				}
 			}
 		}
+
+		# Read FastQ
+		if (nrow(fq.df) > 0){
+			message(paste("      >>> Reading Fastq: ", file.fastq[i], " <<<"))
+			if (file.exists(paste0(FASTQ.F, "/", file.fastq[i]))){
+
+				# then we stream the fastq files at 1,000,000 reads each time (default)
+				stream <- FastqStreamer((paste0(FASTQ.F, "/", file.fastq[i])))
+				message(paste0("         ### ", fq.df$exp.name, " check for primer sequence ", fq.df$primer, 
+					" spacer:", fq.df$spacer, " max mismatch:", mmMax, "\n"))
+				while (length(fq <- yield(stream))){
+					for (i in 1:nrow(fq.df)){
+						primer.seq <- as.character(fq.df$primer[i])
+						spacer <- as.numeric(fq.df$spacer[i])
+						if (mmMax == 0){
+							demultiplex.primer = srFilter(function(x){
+								substr(sread(x), spacer + 1, spacer + nchar(primer.seq)) == primer.seq
+								}, name = "demultiplex.primer")
+							demux.fq <- fq[demultiplex.primer(fq)]
+						} else {
+							shortreads <- narrow(sread(fq), start = spacer + 1, end = spacer + nchar(primer.seq))
+							dist <- srdistance(shortreads, primer.seq, method = "Hamming")[[1]]
+							demux.fq <- fq[dist <= mmMax]
+						}
+						writeFastq(demux.fq, paste0(FASTQ.demux.F, fq.df$exp.name[i], ".fastq.gz"), mode = "a")
+					}
+				}
+				close(stream)
+			}else{
+				error.msg <- paste("      ### WARNING: File", file.fastq[i], " does not exist. Experiment skipped.")
+				write(error.msg, demux.log.path, append = TRUE)
+				message(error.msg)
+			}
+		}
+	}
+	message("\n")
 }
 
 trim.FASTQ <- function(exp.name, firstcutter, secondcutter, file.fastq, trim.F, cutoff, trim.length=0, log.path, min.amount.reads=1000){
 	txt.tmp <- paste0(trim.F, exp.name, ".txt")
 	info.file <- paste0(trim.F, exp.name, ".info.rds")
 	if (file.exists(txt.tmp) & file.exists(info.file)){
-		error.msg <- paste0("         ### WARNING: trimmed file ", exp.name, " already exists, continuing with exisiting file.")
+		error.msg <- paste0("         ### WARNING: trimmed file ", exp.name, " already exists, continuing with existing file.")
 		write(error.msg, log.path, append=TRUE)
 		message(error.msg)
 		return(readRDS(info.file)) 
@@ -478,10 +469,23 @@ norm4C <- function(readsGR, nReads=1e6, nTop=2, wSize=21){
 	wNorm <- nReads/(sum(readsGR$reads)-sumTop)
 	readsGR$normReads <- wNorm*readsGR$reads
 	readsGR$norm4C <- runmean(x=readsGR$normReads, k=wSize, endrule="mean")
+	tmp <- readsGR$norm4C 
+	tmp[tmp < 0] <- 0
+	readsGR$norm4C <- tmp
 	return(readsGR)
 }
 
-exportWig <- function(gR, expName, filename, vpPos, vpChr, plotView, fixed=FALSE, bin=fixedStepWigBin){
+do.wigToBigWig <- function(wig_file, config_genomes, assemblyName){
+	if(!suppressMessages(require(as.character(config_genomes[assemblyName,]), character.only=TRUE))) stop(paste0("Package not found: ", as.character(config_genomes[assemblyName,])))
+	if(!suppressMessages(require("BSgenome", character.only=TRUE))) stop("Package not found: BSgenome")
+
+	do.call(require, args=list(config_genomes[assemblyName,]))
+	assign('genome', base::get(config_genomes[assemblyName,]))
+	info <- seqinfo(genome)
+	wigToBigWig(wig_file, info)
+}
+
+exportWig <- function(gR, expName, filename, vpPos, vpChr, plotView, config_genomes, assemblyName, fixed=FALSE, bin=50){
 	gzname<- paste0(filename, ".gz")
 	gz1 <- gzfile(gzname, "w")
 	
@@ -498,17 +502,12 @@ exportWig <- function(gR, expName, filename, vpPos, vpChr, plotView, fixed=FALSE
 		data <- GRanges(seqnames=seqnames(gR), ranges=gR$pos, strand = strand(gR), score=round(gR$norm4C, digits=5))
 	}
 	export.wig(data, gz1, append = TRUE)
-
 	close(gz1)
 	
-	#Get genome info
-	do.call(require, args=list(config_genomes[assemblyName,]))
-	assign('genome', base::get(config_genomes[assemblyName,]))
-	info <- seqinfo(genome)
-	wigToBigWig(gzname, info)
+	do.wigToBigWig(wig_file=gzname, config_genomes=config_genomes, assemblyName=assemblyName)
 }
 
-exportBDG <- function(gR, expName, filename, vpPos, vpChr, plotView){
+exportBDG <- function(gR, expName, filename, vpPos, vpChr, plotView, interval=FALSE){
 	gzname<- paste0(filename, ".gz")
 	gz1 <- gzfile(gzname, "w")
 	positionLine <- paste0("browser position ", vpChr,":", vpPos-plotView, "-", vpPos+plotView, "\n")
@@ -516,8 +515,26 @@ exportBDG <- function(gR, expName, filename, vpPos, vpChr, plotView){
 	trackLine <- paste0("track type=bedGraph name=", expName, " visibility=full autoScale=off  viewLimits=0.0:2500.0 maxHeightPixels=50:50:8 color=0,0,200  priority=10\n")
 	cat(trackLine, file=gz1, append=TRUE)
 	
-	data_bdg <- data.frame(seqnames=seqnames(gR), start=gR$pos, end=gR$pos, score4C=round(gR$norm4C, digits=5))
+	if (interval == TRUE){
+		data_bdg <- data.frame(seqnames=seqnames(gR), start=start(gR), end=end(gR), score4C=round(gR$norm4C, digits=5))
+	} else {
+		data_bdg <- data.frame(seqnames=seqnames(gR), start=gR$pos, end=gR$pos, score4C=round(gR$norm4C, digits=5))
+	}	
 	write.table(data_bdg, file=gz1, append=TRUE, sep="\t", quote=FALSE, row.names=FALSE, col.names=FALSE)
+	close(gz1)
+}
+
+exportTSV <- function(gR, filename, merge=FALSE){
+	gzname<- paste0(filename, ".gz")
+	gz1 <- gzfile(gzname, "w")
+	if (merge) {
+		tsvdat <- data.frame(chr=seqnames(gR), start=start(gR), end=end(gR), pos=gR$pos, type=gR$type, fe_strand=gR$fe_strand,
+			fe_id=gR$fe_id, normReads=gR$normReads, norm4C=gR$norm4C)
+	} else {
+		tsvdat <- data.frame(chr=seqnames(gR), start=start(gR), end=end(gR), pos=gR$pos, type=gR$type, fe_strand=gR$fe_strand,
+			fe_id=gR$fe_id, reads=gR$reads, normReads=gR$normReads, norm4C=gR$norm4C)
+	}
+	write.table(tsvdat, file=gz1, append=FALSE, sep="\t", quote=FALSE, row.names=FALSE, col.names=TRUE)
 	close(gz1)
 }
 
@@ -588,6 +605,9 @@ alignToFragends <- function(gAlign, fragments, firstcut){
 }
 
 Digest <- function(assemblyName, firstcutter_Digest, secondcutter_Digest, baseFolder_Digest, config_genomes, chr_random, chrUn, chrM){
+	if(!suppressMessages(require(as.character(config_genomes[assemblyName,]), character.only=TRUE))) stop(paste0("Package not found: ", as.character(config_genomes[assemblyName,])))
+	if(!suppressMessages(require("BSgenome", character.only=TRUE))) stop("Package not found: BSgenome")
+
 	firstcutter <- as.character(firstcutter_Digest)
 	secondcutter <- as.character(secondcutter_Digest)
 
@@ -669,7 +689,7 @@ Digest <- function(assemblyName, firstcutter_Digest, secondcutter_Digest, baseFo
 				RE2.ol.start <- RE2[RE2.ol.start[RE2.ol.start$OLpercS==100]$Sindex]
 				nonBlinds.fe3.end <- RE1[length(RE1)]
 				end(nonBlinds.fe3.end) <- end(RE2.ol.start[findOverlaps(frag, RE2.ol.start,select="first")])
-				onBlinds.fe3.end$type <- "non_blind"
+				nonBlinds.fe3.end$type <- "non_blind"
 				nonBlinds.fe3.end$fe_strand <- 3
 			}
 
@@ -691,6 +711,9 @@ Digest <- function(assemblyName, firstcutter_Digest, secondcutter_Digest, baseFo
 
 getUniqueFragends <- function(fragsGR_Unique, firstcutter_Unique, secondcutter_Unique, captureLen_Unique=50, nThreads_Unique=4, baseFolder_Unique, 
 	Bowtie2IndexFile, assemblyName, config_genomes){
+	if(!suppressMessages(require(as.character(config_genomes[assemblyName,]), character.only=TRUE))) stop(paste0("Package not found: ", as.character(config_genomes[assemblyName,])))
+	if(!suppressMessages(require("BSgenome", character.only=TRUE))) stop("Package not found: BSgenome")
+
 	##If captureLen is not in colnames, generate this column
 	if (paste0("len", captureLen_Unique) %in% colnames(elementMetadata(fragsGR_Unique)) == FALSE){
 		message(paste('          ### Create FASTA file for capture length', captureLen_Unique))
@@ -805,9 +828,13 @@ plot.chroms <- function(exp, reads, cutoff=0.999, yMax=2500){
 	axis(2, at= 1:length(chroms)+0.5, lab=chroms, lwd=0, las=2)
 }
 
-make.reads.and.bins <- function(reads, assemblyName, res=25e3, config_genomes){
+make.reads.and.bins <- function(reads, assemblyName, res=25e3, config_genomes, spacer=" "){
+
+	if(!suppressMessages(require(as.character(config_genomes[assemblyName,]), character.only=TRUE))) stop(paste0("Package not found: ", as.character(config_genomes[assemblyName,])))
+	if(!suppressMessages(require("BSgenome", character.only=TRUE))) stop("Package not found: BSgenome")
+	
 	#Extract fragends with reads
-	Captures <- reads[reads$reads>0]
+	Captures <- reads[reads$norm4C>0]
 	Captures.rds<-Captures[,1]
 	Captures.rds$normReads<-round(Captures$normReads,3)
 	Captures.rds$norm4C<-round(Captures$norm4C,3)
@@ -822,12 +849,13 @@ make.reads.and.bins <- function(reads, assemblyName, res=25e3, config_genomes){
 	x<-seqinfo(genome)
 	seqlevels(x) <- chr
 
-	message("          making bins")
+	spacer<- paste0(spacer, "  ")
+	message(paste0(spacer, "making bins"))
 	bin.GR <- tileGenome(x, tilewidth=res, cut.last.tile.in.chrom=TRUE)
 	bin.GR$pos <- start(resize(bin.GR,width=1,fix="center"))
 
 	#overlap
-	message("          Overlapping reads with bins")
+	message(paste0(spacer, "Overlapping reads with bins"))
 	reads <- Captures.rds
 	hits <- findOverlaps(reads,bin.GR)
 	reads$bin <- 0
@@ -844,26 +872,35 @@ make.reads.and.bins <- function(reads, assemblyName, res=25e3, config_genomes){
 	return(list(reads=Captures.rds,bins=bin.GR))
 }
 
-doBins <- function(file, expname, bin, reads, assemblyName, config_genomes, report, vpInfo){
+doBins <- function(file, expname, bin, reads, assemblyName, config_genomes, report, vpInfo, log.path){
+	if (nrow(vpInfo) != 1){
+		spacer = "                 "
+		msg <- paste0(spacer, "--- ")
+	} else {
+		spacer = "           "
+		msg <- paste0(spacer, "### ")
+	}
+
 	if (file.exists(file)){
 		if (bin < 1e3){
-			error.msg <- paste0("         ### WARNING: rds bin file ", expname, " already exist with a bin of ", bin, ", continuing with exisiting file.")
+			error.msg <- paste0(msg, "WARNING: rds bin file ", expname, " already exist with a bin of ", bin, ", continuing with exisiting file.")
 		} else {
-			error.msg <- paste0("         ### WARNING: rds bin file ", expname, " already exist with a bin of ", (bin/1e3), "kb, continuing with exisiting file.")
-		}		
+			error.msg <- paste0(msg, "WARNING: rds bin file ", expname, " already exist with a bin of ", (bin/1e3), "kb, continuing with exisiting file.")
+		}
+	
 		write(error.msg, log.path, append=TRUE)
 		message(error.msg)
 		rds <- readRDS(file)
 		return(list(reads=rds$reads,bins=rds$bins))
 	} else {
-		message("         ### counting normalized reads on bins.")
-		bin.GR <- make.reads.and.bins(reads=reads, assemblyName=assemblyName, res=bin, config_genomes=config_genomes)
+		message(paste0(msg, "counting normalized reads on bins."))
+		bin.GR <- make.reads.and.bins(reads=reads, assemblyName=assemblyName, res=bin, config_genomes=config_genomes, spacer=spacer)
 		saveRDS(object=list(reads=bin.GR$reads, bins=bin.GR$bins, report=report, vpInfo=vpInfo), file=file, compress=TRUE)
 		return(bin.GR)
 	}
 }
 
-export.report <- function(RDS.F, OUTPUT.F){ 
+export.report <- function(RDS.F, OUTPUT.F, logname){ 
 	files <- list.files(path=RDS.F, pattern=".rds", recursive=FALSE)
 	report.df <- data.frame()
 	for(i in 1:length(files)){    
@@ -873,7 +910,7 @@ export.report <- function(RDS.F, OUTPUT.F){
 		newrow <- data.frame(vpname=vpname,report)
 		report.df <- rbind(report.df, newrow)
 	}
-	write.table(report.df, file=paste0(OUTPUT.F,"/report.txt"), row.names=FALSE, quote=FALSE)
+	write.table(report.df, file=paste0(OUTPUT.F,"/report_", logname,".txt"), row.names=FALSE, quote=FALSE)
 }
 
 createReport <- function(allReads, mapReads, demuxReads, chromosome, vpPos, normFactor=1e6, wSize, nTop, motifPosperc, readlenperc){
@@ -977,7 +1014,7 @@ createPlot <- function(plotTitle, vpPos, chromosome, fragGR, plotLegend=NULL, pl
 	}
 }
 
-getVPReads <- function(rds,vpRegion=2e6){
+getVPReads <- function(rds, vpRegion=2e6){
 	reads <- rds$reads
 	vppos <- rds$vpInfo$pos
 	vpChr <- rds$vpInfo$chr
@@ -989,7 +1026,7 @@ getVPReads <- function(rds,vpRegion=2e6){
 	return(peakCDat)
 }
 
-getPeakCPeaks <- function(resPeakC, min.gapwidth){
+getPeakCPeaks <- function(resPeakC, min.gapwidth=0){
 
 	vpChr <- resPeakC$vpChr
 
@@ -1010,9 +1047,7 @@ exportPeakCPeaks <- function(resPeakC, bedFile, name=NULL, desc=NULL, includeVP=
 
 	if(is.null(desc)){
 		desc <- paste0("peakC peaks on ", vpChr)
-	}
-
-	vpGR <- resize(GRanges(seqnames=vpChr, IRanges(vpPos,vpPos)), width=1e3, fix="center")
+	}	
 
 	browserPos <- paste0(vpChr, ":", vpPos-1e6,"-", vpPos+1e6)
 	browserPosLine <- paste("browser position", browserPos, "\n")
@@ -1030,15 +1065,19 @@ exportPeakCPeaks <- function(resPeakC, bedFile, name=NULL, desc=NULL, includeVP=
 		colnames(bedDF)[1] <- "chr"
 		write.table(bedDF, file=bedFile, sep="\t", row.names=FALSE, col.names=FALSE, quote=FALSE, append=TRUE)
 	} else {
+		vpGR <- resize(GRanges(seqnames=vpChr, IRanges(vpPos,vpPos)), width=1e3, fix="center")
 		bedDF <- as.data.frame(resPeakC$exportPeakGR)[,1:3]
 		colnames(bedDF)[1] <- "chr"
 		write.table(bedDF, file=bedFile, sep="\t", row.names=FALSE, col.names=FALSE, quote=FALSE, append=TRUE)
 	}
+
+	return(bedDF)
 }
 
 doPeakC <- function(rdsFiles, vpRegion=2e6, wSize=21, alphaFDR=0.05, qWd=1.5, qWr=1, minDist=15e3){
 	if(!suppressMessages(require("GenomicRanges", character.only=TRUE))) stop("Package not found: GenomicRanges")
 	if(!suppressMessages(require("peakC", character.only=TRUE))) stop("Package not found: peakC")
+	if(!suppressMessages(require("isotone", character.only=TRUE))) stop("Package not found: isotone")
 
 	# Analyze num.exp replicated 4C-Seq experiments with peakC 
 	num.exp <- length(rdsFiles)
@@ -1091,6 +1130,194 @@ doPeakC <- function(rdsFiles, vpRegion=2e6, wSize=21, alphaFDR=0.05, qWd=1.5, qW
 		return(resPeakC)
 }
 
+readConditions <- function(vpInfo, log.path){
+	cond <- unique(vpInfo$condition)
+	to_process <- list()
+	for (k in cond){
+		condVPinfo <- vpInfo[vpInfo$condition == k,]
+		condVPinfo$VP <- paste0(condVPinfo$vpchr, "-", condVPinfo$vppos)
+		name_list <- list()
+		for (z in as.character(unique(condVPinfo$VP))) {
+			tmp <- condVPinfo[condVPinfo$VP == z,]
+			names <- as.vector(tmp$expname)
+			if (length(names) == 1){
+				next
+			} else if(length(names) == length(unique(tmp$replicate))){
+				name_list[[z]] <- names
+			} else {
+				msg <-""
+				for (t in names) {
+					msg <- paste0(msg, " ", t)
+				}
+				error.msg <- paste0("         ### WARNING: these experiments:", msg, "present identical viewpoint, condition and replicate.")
+				message(error.msg)
+				write(error.msg, log.path, append=TRUE)
+			}				
+		}
+		to_process[[k]] <- name_list
+	}
+	return(to_process)
+}
+
+testRDS <- function(rdsFile, parameters, expname, analysis){
+	if(!suppressMessages(require("dplyr", character.only=TRUE))) stop("Package not found: dyplr")
+	rds <- readRDS(rdsFile)
+	if (is.null(rds$run.par)){
+		return(FALSE)
+	}
+	options(scipen = 999)
+
+	tmp <- parameters[grep(pattern='^[0-9]', parameters$value),]
+	numParameters <- data.frame(param=as.character(tmp$param), value=as.character(tmp$value), stringsAsFactors=FALSE)
+	numParameters <- numParameters[-which(numParameters[,1] == "pipeline.version" | numParameters[,1] == "nThreads"),]
+		
+	tmp <- rds$run.par[grep(pattern='^[0-9]', rds$run.par$value),]
+	numRdsParameters <- data.frame(param=as.character(tmp$param), valueRDS=as.character(tmp$value), stringsAsFactors=FALSE)
+	numRdsParameters <- numRdsParameters[-which(numRdsParameters[,1] == "pipeline.version" | numRdsParameters[,1] == "nThreads"),]
+
+	param <- left_join(numParameters, numRdsParameters, by="param")
+	param[which(is.na(param$valueRDS) == TRUE), which(colnames(param) =="valueRDS")] <-  "NotFound"
+	param$test <- ifelse(param$value == param$valueRDS, TRUE, FALSE)
+
+	if(all(param$test) == TRUE){
+		if (analysis == rds$vpInfo$analysis){
+			return(TRUE)
+		} else {
+			return(FALSE)
+		}		
+	} else {
+		diffParam <- param[which(param$test == FALSE),1]
+		if ("min.amount.reads" %in% diffParam | "trim.length" %in% diffParam | "cutoff" %in% diffParam ){
+			txt.tmp <- paste0(trim.F, expname, ".txt")
+			info.file <- paste0(trim.F, expname, ".info.rds")
+			if (file.exists(txt.tmp)){
+				file.remove(txt.tmp)
+			}
+			if (file.exists(info.file)){
+				file.remove(info.file)
+			}
+		}
+		if ("reads.quality" %in% diffParam ){
+			bamFile <- paste0(BAM.F, expname, ".bam")
+			if (file.exists(bamFile)){
+				file.remove(bamFile)
+			}
+		}
+		return(FALSE)
+	}	
+}
+
+make.DESeq2matrix <- function(subVPinfo, gR_positivePeaks, pathToRDS, region=FALSE, merge=FALSE){
+	cond <- unique(subVPinfo$condition)
+	gR_matrix <- GRanges(seqnames=seqnames(gR_positivePeaks), ranges=ranges(gR_positivePeaks), strand=strand(gR_positivePeaks))
+	num_column = 1
+	for (k in cond) {
+		if (merge == TRUE){
+			VP <- paste0("chr", unique(subVPinfo[which(subVPinfo$condition == k), colnames(VPinfo) == "vpchr"]), 
+				"-", unique(subVPinfo[which(subVPinfo$condition == k), colnames(VPinfo) == "vppos"]))
+			expname <- paste0("merge_condition_", k, "_viewpoint_", VP)
+		} else {
+			expname <- subVPinfo[which(subVPinfo$condition == k), colnames(VPinfo) == "expname"]
+			num_replicates <- subVPinfo[which(subVPinfo$condition == k), colnames(VPinfo) == "replicate"]
+		}
+
+		for (y in 1:length(expname)) {
+			rdsFile <- paste0(pathToRDS, expname[y], ".rds")					
+			tmpRDS <- readRDS(rdsFile)
+			reads <- tmpRDS$reads
+			ranges(reads) <- reads$pos
+			rm(tmpRDS)
+
+			if (merge == TRUE){
+				msg <- paste0("merge_", k)
+			} else {
+				rep <- num_replicates[y]
+				msg <- paste0(k, "_", "rep", rep)
+			}
+
+			if(region == TRUE){
+				score <- c()
+				for (l in 1:length(gR_matrix)) {
+					tmp <- gR_matrix[l]
+					peaks <- as.data.frame(reads[unique(queryHits(findOverlaps(reads, tmp)))])
+					score <- c(score, round(median(peaks$norm4C), digits=5))
+				}
+				gR_matrix$tmp <- score
+				colnames(elementMetadata(gR_matrix))[num_column] <- paste0("norm4C_", msg)
+			} else {
+				positive <- reads[unique(queryHits(findOverlaps(reads, gR_matrix)))]				
+				gR_matrix$tmp <- round(positive$norm4C, digits=5)
+				colnames(elementMetadata(gR_matrix))[num_column] <- paste0("norm4C_", msg)
+			}
+			num_column = num_column + 1
+		}
+	}
+
+	tmp <- as.data.frame(gR_matrix)
+	matrix <- tmp[,-(1:5)]
+	if (region == TRUE){
+		rownames(matrix) <- paste0(tmp$seqnames, ":", tmp$start, "-", tmp$end)
+	} else {
+		rownames(matrix) <- paste0(tmp$seqnames, ":", tmp$start)
+	}
+	return(matrix)
+}
+
+do.deseq2 <- function(matrix, metadata, output, expname, ctrlCondition){
+	for (i in 1:ncol(matrix)){
+		matrix[,i] <- as.integer(matrix[,i])
+	}
+	metadata <- subVPinfo[order(metadata$condition), ]
+	metadata$condition <- as.factor(metadata$condition)
+	cond <- unique(metadata$condition)
+
+	dds <- DESeqDataSetFromMatrix(countData = matrix, colData = metadata, design = ~ condition)
+	dds$condition <- relevel(dds$condition, ref=ctrlCondition)
+	
+	# already normalized data
+	sizeFactors(dds) <- 1
+
+	dds <- estimateDispersions(dds, fitType="local", quiet=TRUE)
+	pdf(paste0(output, expname, "_dispersion_estimation_local.pdf"))
+	plotDispEsts(dds)
+	invisible(dev.off())
+
+	dds <- nbinomWaldTest(dds)
+
+	# PCA analysis
+	rld_dds <- rlog(dds, blind=FALSE)
+	pdf(paste0(output, expname, "_PCA_analysis.pdf"))
+	plotPCA(rld_dds, intgroup=c("condition")) + geom_text_repel(aes_string(x = "PC1", y = "PC2", label = "name"), color = "black")
+	invisible(dev.off())
+
+	dataRes <- data.frame(interaction_site=rownames(matrix))
+	dataRes$interaction_site <- as.character(dataRes$interaction_site)
+	for (c in 1:length(cond)) {
+		tmpCond <- as.character(cond[c])
+		dataRes$tmp <- rowMeans(counts(dds, normalized=TRUE)[, dds$condition == tmpCond])
+		colnames(dataRes)[(c+1)] <- paste0("baseMean_", tmpCond)
+	}
+	dataRes$tmp <- rowMeans(counts(dds, normalized=TRUE))
+	colnames(dataRes)[(length(cond) + 2)] <- "baseMean"
+
+	resNames <- resultsNames(dds)
+	resNames <- resNames[-1]
+	for (res in resNames) {
+		tempRes <- as.data.frame(results(dds, alpha=0.1 , pAdjustMethod="BH", name=res, format="DataFrame"))
+		tempRes <- tempRes[-1]
+		CN <- gsub("condition_", "", res)
+		colnames(tempRes) <- c(paste0(CN, ".log2FoldChange"), paste0(CN, ".lfcSE"), paste0(CN, ".stat"), paste0(CN, ".pvalue"), paste0(CN, ".padj"))
+		tempRes$interaction_site <- as.character(rownames(tempRes))
+		dataRes <- left_join(dataRes, tempRes, by="interaction_site")
+	}
+	for (i in 1:ncol(dataRes)) {
+		if(class(dataRes[, i]) == "numeric"){
+			dataRes[, i] <- round(dataRes[, i], digits=3)
+		}
+	}
+	tableName <- paste0(output, expname, "_DESeq2_results.txt")
+	write.table(dataRes, file=tableName, eol="\n", sep="\t", row.names=FALSE, quote=FALSE, col.names = TRUE)
+}
 
 Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 	#4C-pipeline
@@ -1136,6 +1363,9 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 	qWd = configuration$qWd
 	qWr = configuration$qWr
 	minDist = configuration$minDist
+	minGapwidth = configuration$min.gapwidth
+	DESeq2 = configuration$DESeq2
+	ctrl = configuration$ctrl
 
 
 	# create folders
@@ -1145,18 +1375,25 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 	TRIM.F <-gsub(x=paste0(OUTPUT.F, "/TRIMMED/"), pattern='//', replacement='/')
 	BAM.F <-gsub(x=paste0(OUTPUT.F, "/BAM/"), pattern='//', replacement='/')
 	RDS.F <-gsub(x=paste0(OUTPUT.F, "/RDS/"), pattern='//', replacement='/')
+	RDS.MERGE.F <-gsub(x=paste0(OUTPUT.F, "/RDS/MergeRDS/"), pattern='//', replacement='/')
 	RDS.BIN.F <- gsub(x=paste0(OUTPUT.F, "/RDS-BIN/"), pattern='//', replacement='/')
+	RDS.BIN.MERGE.F <- gsub(x=paste0(OUTPUT.F, "/RDS-BIN/MergeRDS-BIN/"), pattern='//', replacement='/')
 	PLOT.F <- gsub(x=paste0(OUTPUT.F, "/PLOT/"), pattern='//', replacement='/')
+	PLOT.MERGE.F <- gsub(x=paste0(OUTPUT.F, "/PLOT/MergePLOT/"), pattern='//', replacement='/')
 	BDG.F <- gsub(x=paste0(OUTPUT.F, "/BDG/"), pattern='//', replacement='/')
 	BDG.MERGE.F <- gsub(x=paste0(OUTPUT.F, "/BDG/MergeBDG/"), pattern='//', replacement='/')
 	WIG.F <- gsub(x=paste0(OUTPUT.F, "/WIG/"), pattern='//', replacement='/')
 	WIG.MERGE.F <- gsub(x=paste0(OUTPUT.F, "/WIG/MergeWIG/"), pattern='//', replacement='/')
 	GENOMEPLOT.F <- gsub(x=paste0(OUTPUT.F, "/GENOMEPLOT/"), pattern='//', replacement='/')
+	GENOMEPLOT.MERGE.F <- gsub(x=paste0(OUTPUT.F, "/GENOMEPLOT/MergeGENOMEPLOT/"), pattern='//', replacement='/')
 	TSV.F <- gsub(x=paste0(OUTPUT.F, "/TSV/"), pattern='//', replacement='/')
 	TSV.MERGE.F <- gsub(x=paste0(OUTPUT.F, "/TSV/MergeTSV/"), pattern='//', replacement='/')
 
 	PEAKC.F <- gsub(x=paste0(OUTPUT.F, "/PEAKC/"), pattern='//', replacement='/')
 	PEAKC.PLOTS.F <- gsub(x=paste0(OUTPUT.F, "/PEAKC/Plots/"), pattern='//', replacement='/')
+	PEAKC.BED_BDG.F <- gsub(x=paste0(OUTPUT.F, "/PEAKC/BED_and_BDG/"), pattern='//', replacement='/')
+	PEAKC.RDS.F <- gsub(x=paste0(OUTPUT.F, "/PEAKC/RDS/"), pattern='//', replacement='/')
+	PEAKC.DESeq2.F <- gsub(x=paste0(OUTPUT.F, "/PEAKC/DESeq2/"), pattern='//', replacement='/')
 
 	logDirs <- list()
 
@@ -1171,14 +1408,22 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 
 	# Extract experiments from VPinfo, remove weird characters and save in output folder. 
 	message(paste0("\n------ Reading the VP info file: ", VPinfo.file))
-	VPinfo <- Read.VPinfo(VPinfo.file)
+	VPinfo <- Read.VPinfo(VPinfo.file=VPinfo.file, replicates=replicates)
 	if (is.null(VPinfo)){
 		stop("viewpoint info file (vpFile) not correct.")
 	}
 	write.table(VPinfo, paste0(OUTPUT.F, "/VPinfo.txt"), sep="\t", row.names=FALSE, quote=F)
 
+	if (replicates == TRUE){
+		logDirs$rdsMergeFolder <- ifelse(!dir.exists(RDS.MERGE.F), dir.create(RDS.MERGE.F), FALSE)
+		logDirs$rdsbinMergeFolder <- ifelse(!dir.exists(RDS.BIN.MERGE.F), dir.create(RDS.BIN.MERGE.F), FALSE)
+	}
+
 	if (make.cisplot == TRUE){
 		logDirs$plotFolder <- ifelse(!dir.exists(PLOT.F), dir.create(PLOT.F), FALSE)
+		if(replicates == TRUE){
+			logDirs$plotMergeFolder <- ifelse(!dir.exists(PLOT.MERGE.F), dir.create(PLOT.MERGE.F), FALSE)
+		}
 	}
 	if (make.bdg == TRUE){
 		logDirs$bdgFolder <- ifelse(!dir.exists(BDG.F), dir.create(BDG.F), FALSE)
@@ -1194,6 +1439,9 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 	}
 	if(any(VPinfo$analysis == 'all') & make.gwplot){
 		logDirs$genomeplotFolder <- ifelse(!dir.exists(GENOMEPLOT.F), dir.create(GENOMEPLOT.F), FALSE)
+		if(replicates == TRUE){
+			logDirs$genomeplotMergeFolder <- ifelse(!dir.exists(GENOMEPLOT.MERGE.F), dir.create(GENOMEPLOT.MERGE.F), FALSE)
+		}
 	}
 	if (tsv == TRUE){
 		logDirs$tsvFolder <- ifelse(!dir.exists(TSV.F), dir.create(TSV.F), FALSE)
@@ -1202,35 +1450,41 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 		}
 	}
 	if (peakC == TRUE){
+		if(!suppressMessages(require("peakC", character.only=TRUE))) stop("Package not found: peakC")
+		if(!suppressMessages(require("isotone", character.only=TRUE))) stop("Package not found: isotone")
 		logDirs$peakcFolder <- ifelse(!dir.exists(PEAKC.F), dir.create(PEAKC.F), FALSE)
 		logDirs$peakcFolderPlots <- ifelse(!dir.exists(PEAKC.PLOTS.F), dir.create(PEAKC.PLOTS.F), FALSE)
+		logDirs$peakcFolderBED_BDG <- ifelse(!dir.exists(PEAKC.BED_BDG.F), dir.create(PEAKC.BED_BDG.F), FALSE)
+		logDirs$peakcFolderRDS <- ifelse(!dir.exists(PEAKC.RDS.F), dir.create(PEAKC.RDS.F), FALSE)
+		if (DESeq2 == TRUE){
+			if(!suppressMessages(require("DESeq2", character.only=TRUE))) stop("Package not found: DESeq2")
+			if(!suppressMessages(require("ggplot2", character.only=TRUE))) stop("Package not found: ggplot2")
+			if(!suppressMessages(require("ggrepel", character.only=TRUE))) stop("Package not found: ggrepel")
+			logDirs$peakcFolderDESeq2 <- ifelse(!dir.exists(PEAKC.DESeq2.F), dir.create(PEAKC.DESeq2.F), FALSE)
+		}
 	}
 
 	# Make Log files
 	LOGNAME <- format(Sys.time(), '%Y_%m_%d__%H_%M_%S')
-	log.path <- paste0(LOG.F, "Log_", LOGNAME, ".txt")
+	log.path <- paste0(LOG.F, "Log_pipe4C_", LOGNAME, ".txt")
 	demux.log.path <- paste0(LOG.F, "Log_demux_", LOGNAME, ".txt")
 	trim.log.path <- paste0(LOG.F, "Log_4Ctrim_", LOGNAME, ".txt")
-	bowtie.log.path <- paste0(LOG.F, "Bowtie2Log_", LOGNAME, ".txt")
+	bowtie.log.path <- paste0(LOG.F, "Log_Bowtie2", LOGNAME, ".txt")
 
 	# Save Run parameters to logfile
 	run.par <- data.frame(
-		param=c("pipeline.version", "baseFolder", "VPinfo.file", "FASTQ.F", "OUTPUT.F", "cutoff", "trim.length", "reads.quality", "map.unique", 
-			"wSize", "nTop", "make.bdg", "make.wig", "make.fixedStep", "fixedStepWigBin", "make.cisplot", "make.gwplot", "nThreads", "normFactor", "nonBlind", "tsv","bins", 
-			"mmMax", "chr_random", "chrUn", "chrM", "peakC", "replicates", "vpRegion", "alphaFDR", "qWd", "qWr", "minDist"),
-		value=c(configuration$pipeline.version, configuration$baseFolder, VPinfo.file, FASTQ.F, OUTPUT.F, cutoff, trim.length, reads.quality, map.unique, 
-			wSize, nTop, make.bdg, make.wig, make.fixedStep, fixedStepWigBin, make.cisplot, make.gwplot, nThreads,normFactor, nonBlind, tsv,bins, mmMax, chr_random, 
-			chrUn, chrM, peakC, replicates, vpRegion, alphaFDR, qWd, qWr, minDist))
+		param=c("pipeline.version", "baseFolder", "VPinfo.file", "FASTQ.F", "OUTPUT.F", "normFactor", "cutoff", "trim.length",
+			"minAmountReads", "reads.quality", "map.unique", "wSize", "nTop", "make.bdg", "make.wig", "make.fixedStep", "fixedStepWigBin",
+			"make.cisplot", "make.gwplot", "nThreads", "nonBlind", "tsv","bins", "mmMax", "chr_random", "chrUn", "chrM", "peakC",
+			"replicates", "vpRegion", "alphaFDR", "qWd", "qWr", "minDist", "min.gapwidth", "DESeq2"),
+		value=c(configuration$pipeline.version, configuration$baseFolder, VPinfo.file, FASTQ.F, OUTPUT.F, normFactor, cutoff, trim.length, 
+			min.amount.reads, reads.quality, map.unique, wSize, nTop, make.bdg, make.wig, make.fixedStep, fixedStepWigBin, make.cisplot, make.gwplot, 
+			nThreads, nonBlind, tsv,bins, mmMax, chr_random, chrUn, chrM, peakC, replicates, vpRegion, alphaFDR, qWd, qWr, minDist, minGapwidth, DESeq2))
 
 	write.table(run.par, log.path, quote=FALSE, col.names=FALSE, row.names=FALSE, append=TRUE)
 
-
-	#1. demux.FASTQ
-	#Demultiplex all fastq files and write in FASTQ folder in OUTPUT.F
-	message("\n------ Demultiplexing Fastq files based on VPinfo file")
-	demux.FASTQ(VPinfo=VPinfo, FASTQ.F=FASTQ.F, FASTQ.demux.F=FASTQ.demux.F, demux.log.path=demux.log.path, mmMax = mmMax)
-
 	#4C-seq analysis
+	message("\n------ 4Cseq analysis\n")
 
 	exp.name <- as.character(VPinfo$expname)
 	primer <- as.character(VPinfo$primer)
@@ -1240,161 +1494,198 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 	vpChr <- as.character(VPinfo$vpchr)
 	vppos <- as.numeric(VPinfo$vppos)
 	analysis <- as.character(VPinfo$analysis)
-	condition_list <- as.factor(VPinfo$condition)
-	replicate_list <- as.factor(VPinfo$replicate)
 
-	message("\n------ 4Cseq analysis")
+	#Check for existing analysis
+	message(" +++ Checking existing analysis +++")
+	needToLoad <- c()
+	for (i in 1:length(exp.name)){
+		rdsFile<-paste0(RDS.F, exp.name[i], ".rds")
+		
+		if (file.exists(rdsFile)){
+			tmp <- testRDS(rdsFile=rdsFile, parameters=run.par, expname=exp.name[i], analysis=analysis[i])
+			needToLoad <- c(needToLoad, tmp)
+		} else {
+			needToLoad <- c(needToLoad, FALSE)
+		}
+	}
+
+	#1. demux.FASTQ
+	#Demultiplex all fastq files and write in FASTQ folder in OUTPUT.F
+	message(" +++ Demultiplexing Fastq files based on VPinfo file +++")
+	demux.FASTQ(VPinfo=VPinfo, FASTQ.F=FASTQ.F, FASTQ.demux.F=FASTQ.demux.F, demux.log.path=demux.log.path, mmMax = mmMax)
+
+	if (peakC == TRUE & DESeq2 == TRUE){
+		list_peakCPeaksPos_Per_VP <- list()
+		list_peakCRegionsPos_Per_VP <- list()
+		if (replicates == TRUE){
+			list_peakCMergePeaksPos_Per_VP <- list()
+			list_peakCMergeRegionsPos_Per_VP <- list()
+		}
+	}
 
 	for (i in 1:length(exp.name)){
-
 		message(paste0(" +++ experiment: ", exp.name[i], " +++"))
 
-		#skip already generated files
 		rdsFile<-paste0(RDS.F, exp.name[i], ".rds")
-		if (file.exists(rdsFile)){
-			error.msg <- paste("         ### WARNING: rds file", exp.name[i], "already exist, overwriting exisiting analysis.")
-			write(error.msg, log.path, append=TRUE)
-			message(error.msg)
-		}
-
-		primer.sequence <- primer[i]
-
-		file.fastq <- paste0(FASTQ.demux.F, exp.name[i], ".fastq.gz")
 		CHR <- paste0("chr", vpChr[i])
 
-		if (exp.name[i] %in% exp.name[duplicated(exp.name)]){
-			error.msg <- paste0("      ### ERROR: Experiment name not unique for ", exp.name[i])
+		if (file.exists(rdsFile) & needToLoad[i]){
+			error.msg <- paste0("         ### WARNING: rds file ", exp.name[i], " already exists with identical parameters, continuing with existing file.")
 			write(error.msg, log.path, append=TRUE)
 			message(error.msg)
-			next
-		}
+			rds <- readRDS(rdsFile)
+			reportAnalysis <- rds$report
+			vpInfo <- rds$vpInfo
 
-		if (!(firstenzyme[i] %in% rownames(configuration$enzymes))){
-			error.msg <- paste0("      ### ERROR: firstcutter not found for ", exp.name[i])
-			write(error.msg, log.path, append=TRUE)
-			message(error.msg)
-			next
-		}
-
-		firstcutter <- configuration$enzyme[firstenzyme[i],]
-
-		if (!(secondenzyme[i] %in% rownames(configuration$enzymes))){
-			error.msg <- paste0("      ### ERROR: secondcutter not found for ", exp.name[i])
-			write(error.msg, log.path, append=TRUE)
-			message(error.msg)
-			next
-		}
-
-		secondcutter <- configuration$enzyme[secondenzyme[i],]
-
-		if (!(genome[i] %in% rownames(configuration$genomes))){
-			error.msg <- paste0("      ### ERROR: genome not found for ", exp.name[i])
-			write(error.msg, log.path, append=TRUE)
-			message(error.msg)
-			next
-		}
-
-		if (!(analysis[i] %in% c("cis", "all"))){
-			error.msg <- paste0("      ### ERROR: analysis of cis/all not found for ", exp.name[i])
-			write(error.msg, log.path, append=TRUE)
-			message(error.msg)
-			next
-		}
-
-		if (!file.exists(file.fastq)){
-			error.msg <- paste0("      ### ERROR: ", exp.name[i], " FASTQ file does not exist")
-			write(error.msg, log.path, append=TRUE)
-			message(error.msg)
-			next
-		}
-
-
-		#2. trim.FASTQ
-		message("      >>> Trim of the fastq <<<")
-		trim.FASTQ <- trim.FASTQ(exp.name=exp.name[i], firstcutter=firstcutter, secondcutter=secondcutter, file.fastq=file.fastq, trim.F=TRIM.F, 
-			cutoff=cutoff, trim.length=trim.length, log.path=trim.log.path, min.amount.reads=min.amount.reads)
-
-		txt.tmp <- paste0(TRIM.F, exp.name[i], ".txt")
-		if (!file.exists(txt.tmp)){
-			error.msg <- paste0("         ### ERROR: ", exp.name[i], " trimmed file not found")
-			write(error.msg, log.path, append=TRUE)
-			message(error.msg)
-			next
-		}
-
-		captureLen <- trim.FASTQ$captureLen
-
-		if (captureLen<=nchar(firstcutter)){
-			error.msg <- paste0("         ### ERROR: ", exp.name[i], " capture length <= length firstcutter motif.")
-			message("         ### Skipping experiment.")
-			write(error.msg, log.path, append=TRUE)
-			message(error.msg)
-			next
-		}
-
-		nReads <- trim.FASTQ$nReads
-		motifPosperc <-trim.FASTQ$motifPosperc
-		readlenperc <- trim.FASTQ$readlenperc
-
-
-		# 3. make BAM files
-		message("      >>> Alignment of reads to reference genome <<<")
-		bamFile <- paste0(BAM.F, exp.name[i], ".bam")
-
-		if (!file.exists(bamFile)){
-			makeBAM(exp.name=exp.name[i], BAM.F=BAM.F, NCORES=nThreads, Bowtie2IndexFile=configuration$bt2Genomes[genome[i],], txt.tmp=txt.tmp, 
-				log.path=log.path, bowtie.log.path=bowtie.log.path, bamFile=bamFile, map.unique=map.unique, readsQual=reads.quality)
+			if (vpInfo$analysis == "cis"){
+				reads.cis <- rds$reads				
+			} else if (vpInfo$analysis == "all"){
+				reads.all <- rds$reads
+				reads.cis <- norm4C(readsGR=reads.all[as.vector(seqnames(reads.all)) == CHR,], nReads=normFactor, wSize=wSize, nTop=nTop)
+			}
+			rm(rds)
 		} else {
-			error.msg <- paste("         ### WARNING: ", exp.name[i], " BAM file already exist, continuing with exisiting file.")
-			write(error.msg, log.path, append=TRUE)
-			message(error.msg)
-		}
-
-		mappedReads <- readGAlignments(file=bamFile, index=bamFile)
-
-		# To do: lock frag map
-		#exec 3>hg19_Dpn2_Csp6I # open a file handle; this part will always succeed
-		#flock -x 3      # lock the file handle; this part will block
-		#To release the lock:
-		#exec 3>&-       # close the file handle
-
-		message(paste0("      >>> Create frag map for genome: ", genome[i], " with RE1:", firstcutter, " and RE2:", secondcutter, " and capture length:", captureLen, " <<<"))
-		frags <- getFragMap(vpChr_FragMap=NULL,	firstcutter_FragMap=firstcutter, secondcutter_FragMap=secondcutter, genome_FragMap=genome[i],	captureLen_FragMap=captureLen,
-			nThreads_FragMap=nThreads, baseFolder_FragMap=configuration$baseFolder,	Bowtie2IndexFile=configuration$bt2Genomes[genome[i],],	config_genomes=configuration$genomes,
-			chr_random=chr_random, chrUn=chrUn, chrM = chrM)
-
-		message("      >>> Align reads to fragments <<<")
-		readsAln <- alignToFragends(gAlign=mappedReads, fragments=frags, firstcut=firstcutter)
-
-		message("      >>> Compute statistics and create report <<<")
-		reportAnalysis <- createReport(allReads=readsAln, mapReads=mappedReads, demuxReads=nReads, chromosome=CHR, vpPos=vppos[i], normFactor=normFactor, 
-			wSize=wSize, nTop=nTop, motifPosperc=motifPosperc, readlenperc=readlenperc)
-
-		vpInfo <- data.frame(name=exp.name[i], Fastq=file.fastq, primer=primer.sequence, genome=genome[i], firstcutter=firstcutter, secondcutter=secondcutter, 
-			chr=CHR, pos=vppos[i], captureLen=captureLen, date=Sys.time(), Pipeline=configuration$pipeline.version)
-
-
-		#Extract Cis reads.
-		message("      >>> Compute normalized 4C score per fragment <<<")
-
-		#5. make RDS file
-		rdsFile<-paste0(RDS.F, exp.name[i], ".rds")
-
-		if (analysis[i] == "cis" | make.cisplot == TRUE){
-			reads.cis <- norm4C(readsGR=readsAln[as.vector(seqnames(readsAln)) == CHR], nReads=normFactor, wSize=wSize, nTop=nTop)
-			if (nonBlind){
-				reads.cis<-reads.cis[reads.cis$type=="non_blind"]
+			if (exp.name[i] %in% exp.name[duplicated(exp.name)]){
+				error.msg <- paste0("      ### ERROR: Experiment name not unique for ", exp.name[i])
+				write(error.msg, log.path, append=TRUE)
+				message(error.msg)
+				next
 			}
-		}		
+			primer.sequence <- primer[i]
 
-		if (analysis[i] == "all" | bins == TRUE | make.gwplot == TRUE){
-			#normalization all reads is used
-			reads.all <- norm4C(readsGR=readsAln, nReads=normFactor, wSize=wSize, nTop=nTop)
-			if (nonBlind){
-				reads.all<-reads.all[reads.all$type=="non_blind"]
+			if (!(firstenzyme[i] %in% rownames(configuration$enzymes))){
+				error.msg <- paste0("      ### ERROR: firstcutter not found for ", exp.name[i])
+				write(error.msg, log.path, append=TRUE)
+				message(error.msg)
+				next
+			}
+			firstcutter <- configuration$enzyme[firstenzyme[i],]
+
+			if (!(secondenzyme[i] %in% rownames(configuration$enzymes))){
+				error.msg <- paste0("      ### ERROR: secondcutter not found for ", exp.name[i])
+				write(error.msg, log.path, append=TRUE)
+				message(error.msg)
+				next
+			}
+			secondcutter <- configuration$enzyme[secondenzyme[i],]
+
+			if (!(genome[i] %in% rownames(configuration$genomes))){
+				error.msg <- paste0("      ### ERROR: genome not found for ", exp.name[i])
+				write(error.msg, log.path, append=TRUE)
+				message(error.msg)
+				next
+			}
+
+			if (!(analysis[i] %in% c("cis", "all"))){
+				error.msg <- paste0("      ### ERROR: analysis of cis/all not found for ", exp.name[i])
+				write(error.msg, log.path, append=TRUE)
+				message(error.msg)
+				next
+			}
+
+			file.fastq <- paste0(FASTQ.demux.F, exp.name[i], ".fastq.gz")
+
+			if (!file.exists(file.fastq)){
+				error.msg <- paste0("      ### ERROR: ", exp.name[i], " FASTQ file does not exist")
+				write(error.msg, log.path, append=TRUE)
+				message(error.msg)
+				next
+			}
+
+
+			#2. trim.FASTQ
+			message("      >>> Trim of the fastq <<<")
+			trimFASTQ <- trim.FASTQ(exp.name=exp.name[i], firstcutter=firstcutter, secondcutter=secondcutter, file.fastq=file.fastq, trim.F=TRIM.F, 
+				cutoff=cutoff, trim.length=trim.length, log.path=trim.log.path, min.amount.reads=min.amount.reads)
+
+			txt.tmp <- paste0(TRIM.F, exp.name[i], ".txt")
+			if (!file.exists(txt.tmp)){
+				error.msg <- paste0("         ### ERROR: ", exp.name[i], " trimmed file not found")
+				write(error.msg, log.path, append=TRUE)
+				message(error.msg)
+				next
+			}
+
+			captureLen <- trimFASTQ$captureLen
+
+			if (captureLen<=nchar(firstcutter)){
+				error.msg <- paste0("         ### ERROR: ", exp.name[i], " capture length <= length firstcutter motif.")
+				message("         ### Skipping experiment.")
+				write(error.msg, log.path, append=TRUE)
+				message(error.msg)
+				next
+			}
+
+			nReads <- trimFASTQ$nReads
+			motifPosperc <-trimFASTQ$motifPosperc
+			readlenperc <- trimFASTQ$readlenperc
+
+
+			# 3. make BAM files
+			message("      >>> Alignment of reads to reference genome <<<")
+			bamFile <- paste0(BAM.F, exp.name[i], ".bam")
+
+			if (!file.exists(bamFile)){
+				makeBAM(exp.name=exp.name[i], BAM.F=BAM.F, NCORES=nThreads, Bowtie2IndexFile=configuration$bt2Genomes[genome[i],], txt.tmp=txt.tmp, 
+					log.path=log.path, bowtie.log.path=bowtie.log.path, bamFile=bamFile, map.unique=map.unique, readsQual=reads.quality)
+			} else {
+				error.msg <- paste("         ### WARNING: ", exp.name[i], " BAM file already exist, continuing with exisiting file.")
+				write(error.msg, log.path, append=TRUE)
+				message(error.msg)
+			}
+
+			mappedReads <- readGAlignments(file=bamFile, index=bamFile)
+
+			# To do: lock frag map
+			#exec 3>hg19_Dpn2_Csp6I # open a file handle; this part will always succeed
+			#flock -x 3      # lock the file handle; this part will block
+			#To release the lock:
+			#exec 3>&-       # close the file handle
+
+			message(paste0("      >>> Create frag map for genome: ", genome[i], " with RE1:", firstcutter, " and RE2:", secondcutter, " and capture length:", captureLen, " <<<"))
+			frags <- getFragMap(vpChr_FragMap=NULL,	firstcutter_FragMap=firstcutter, secondcutter_FragMap=secondcutter, genome_FragMap=genome[i],	captureLen_FragMap=captureLen,
+				nThreads_FragMap=nThreads, baseFolder_FragMap=configuration$baseFolder,	Bowtie2IndexFile=configuration$bt2Genomes[genome[i],],	config_genomes=configuration$genomes,
+				chr_random=chr_random, chrUn=chrUn, chrM = chrM)
+
+			message("      >>> Align reads to fragments <<<")
+			readsAln <- alignToFragends(gAlign=mappedReads, fragments=frags, firstcut=firstcutter)
+			rm(frags)
+
+			message("      >>> Compute statistics and create report <<<")
+			reportAnalysis <- createReport(allReads=readsAln, mapReads=mappedReads, demuxReads=nReads, chromosome=CHR, vpPos=vppos[i], normFactor=normFactor, 
+				wSize=wSize, nTop=nTop, motifPosperc=motifPosperc, readlenperc=readlenperc)
+
+			vpInfo <- data.frame(name=exp.name[i], Fastq=file.fastq, primer=primer.sequence, genome=genome[i], firstcutter=firstcutter, secondcutter=secondcutter, 
+				chr=CHR, pos=vppos[i], captureLen=captureLen, analysis=analysis[i], date=Sys.time(), Pipeline=configuration$pipeline.version)
+
+
+			#Extract Cis reads.
+			message("      >>> Compute normalized 4C score per fragment <<<")
+
+			#Data normalization
+			if (analysis[i] == "cis" | make.cisplot == TRUE){
+				reads.cis <- norm4C(readsGR=readsAln[as.vector(seqnames(readsAln)) == CHR], nReads=normFactor, wSize=wSize, nTop=nTop)
+				if (nonBlind){
+					reads.cis<-reads.cis[reads.cis$type=="non_blind"]
+				}
+			}		
+
+			if (analysis[i] == "all" | bins == TRUE | make.gwplot == TRUE){
+				reads.all <- norm4C(readsGR=readsAln, nReads=normFactor, wSize=wSize, nTop=nTop)
+				if (nonBlind){
+					reads.all<-reads.all[reads.all$type=="non_blind"]
+				}
+			}
+			rm(readsAln)
+
+			#5. make RDS file
+			if (analysis[i] == "cis"){
+				saveRDS(list(reads=reads.cis, report=reportAnalysis, vpInfo=vpInfo, run.par=run.par), file=rdsFile)
+			} else if (analysis[i] == "all"){
+				saveRDS(list(reads=reads.all, report=reportAnalysis, vpInfo=vpInfo, run.par=run.par), file=rdsFile)
 			}
 		}
-
+		
 		if (bins == TRUE | make.gwplot == TRUE){
 			if (analysis[i] == "all"){
 				message("      >>> Creating bins <<<")	
@@ -1402,17 +1693,10 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 					file.out <- paste0(RDS.BIN.F, exp.name[i], "_bin_res_", configuration$binSize, "bp.rds")
 				} else {
 					file.out <- paste0(RDS.BIN.F, exp.name[i], "_bin_res_", (configuration$binSize/1e3), "kb.rds")
-				}
-				
+				}				
 				bin.GR <- doBins(file=file.out,  expname=exp.name[i], bin=configuration$binSize , reads=reads.all, assemblyName=genome[i], 
-					config_genomes=configuration$genomes, report=reportAnalysis, vpInfo=vpInfo)
+					config_genomes=configuration$genomes, report=reportAnalysis, vpInfo=vpInfo, log.path=log.path)
 			}
-		}
-
-		if (analysis[i] == "cis"){
-			saveRDS(list(reads=reads.cis, report=reportAnalysis, vpInfo=vpInfo), file=rdsFile)
-		} else if (analysis[i] == "all"){
-			saveRDS(list(reads=reads.all, report=reportAnalysis, vpInfo=vpInfo), file=rdsFile)
 		}
 		
 		#6. make plot
@@ -1427,29 +1711,32 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 			createPlot(plotTitle=exp.name[i], vpPos=vppos[i], chromosome=CHR, fragGR=bin.GR, plotLegend=reportAnalysis, plotView=configuration$plotView,
 				maxY=configuration$maxY, minY=0, xaxisUnit=configuration$xaxisUnit, plotRegion='all', foldOut=GENOMEPLOT.F, plotType=configuration$plotType)
 		}
+		rm(reportAnalysis)
 
 		#Export data
 		if (make.bdg == TRUE){
 			message("      >>> Creating bedGraph file <<<")
 
 			if (nonBlind){
-				bdgFile <- paste0(BDG.F, exp.name[i], "_nonblind_WIN",wSize,".bedGraph")
+				bdgFile <- paste0(BDG.F, exp.name[i], "_nonblind_WIN", wSize,".bedGraph")
 			} else {
-				bdgFile <- paste0(BDG.F, exp.name[i],"_WIN",wSize ,".bedGraph")
+				bdgFile <- paste0(BDG.F, exp.name[i], "_WIN", wSize ,".bedGraph")
 			}
+			gzBDGName <- paste0(bdgFile, ".gz")
 
-			if (file.exists(bdgFile)){
-				error.msg <- paste("         ### WARNING: ", exp.name[i], " bedGraph file already exist.")
+			if (file.exists(bdgFile) | file.exists(gzBDGName)){
+				error.msg <- paste0("         ### WARNING: ", exp.name[i], " bedGraph file already exists.")
 				message(error.msg)
 				write(error.msg, log.path, append=TRUE)
 			} else {
 				if (analysis[i] == "cis"){
 					reads.bdg <- reads.cis[order(reads.cis$pos)]
 				} else {
-					reads.bdg <- reads.all[order(seqnames(reads.all),reads.all$pos)]
+					reads.bdg <- reads.all[order(seqnames(reads.all), reads.all$pos)]
 				}
 				message("         ### Generation of bedGraph file.")
-				exportBDG(gR=reads.bdg, expName=exp.name[i], filename=bdgFile, vpPos=vppos[i], vpChr=CHR, plotView=configuration$plotView)
+				exportBDG(gR=reads.bdg, expName=exp.name[i], filename=bdgFile, vpPos=vppos[i], vpChr=CHR, 
+					plotView=configuration$plotView, interval=FALSE)
 			}
 		}
 
@@ -1457,15 +1744,26 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 			message("      >>> Creating WIG file <<<")
 
 			if (nonBlind){
-				wigFile <- paste0(WIG.F, exp.name[i], "_nonblind_WIN",wSize,".wig")
+				wigFile <- paste0(WIG.F, exp.name[i], "_nonblind_WIN", wSize, ".wig")
 			} else {
-				wigFile <- paste0(WIG.F, exp.name[i],"_WIN",wSize ,".wig")
+				wigFile <- paste0(WIG.F, exp.name[i], "_WIN", wSize , ".wig")
 			}
+			gzWigName <- paste0(wigFile, ".gz")
+			bwName <- gsub(".wig", ".bw", wigFile)
 
-			if (file.exists(wigFile)){
-				error.msg <- paste("         ### WARNING: ", exp.name[i], " WIG file already exist.")
+			if (file.exists(wigFile) | file.exists(gzWigName) & file.exists(bwName)){
+				error.msg <- paste0("         ### WARNING: ", exp.name[i], " WIG and BIGWIG files already exist.")
 				message(error.msg)
 				write(error.msg, log.path, append=TRUE)
+			} else if (file.exists(wigFile) | file.exists(gzWigName) & !file.exists(bwName)){
+				error.msg <- paste0("         ### WARNING: ", exp.name[i], " WIG file already exists.")
+				message(error.msg)
+				write(error.msg, log.path, append=TRUE)
+				if (file.exists(wigFile)){
+					do.wigToBigWig(wig_file=wigFile, config_genomes=configuration$genomes, assemblyName=genome[i])
+				} else {
+					do.wigToBigWig(wig_file=gzWigName, config_genomes=configuration$genomes, assemblyName=genome[i])
+				}				
 			} else {
 				if (analysis[i] == "cis"){
 					reads.wig <- reads.cis[order(reads.cis$pos)]
@@ -1473,20 +1771,33 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 					reads.wig <- reads.all[order(seqnames(reads.all),reads.all$pos)]
 				}
 				message("         ### Generation of variableStep WIG file.")
-				exportWig(gR=reads.wig, expName=exp.name[i], filename=wigFile, vpPos=vppos[i], vpChr=CHR, plotView=configuration$plotView, fixed=FALSE)
+				exportWig(gR=reads.wig, expName=exp.name[i], filename=wigFile, vpPos=vppos[i], vpChr=CHR, plotView=configuration$plotView, 
+					config_genomes=configuration$genomes, assemblyName=genome[i], fixed=FALSE)
 			}
 
 			if (make.fixedStep){
 				if (nonBlind){
 					wigBinFile <- paste0(WIG.F, exp.name[i], "_nonblind_BIN_", fixedStepWigBin, ".wig")
 				} else {
-					wigBinFile <- paste0(WIG.F, exp.name[i],"_BIN", fixedStepWigBin, "_TEST_norm4C.wig")
+					wigBinFile <- paste0(WIG.F, exp.name[i], "_BIN", fixedStepWigBin, ".wig")
 				}
 
-				if (file.exists(wigBinFile)){
-					error.msg <- paste("         ### WARNING: ", exp.name[i], " fixedStep WIG file already exist.")
+				gzWigBinName <- paste0(wigBinFile, ".gz")
+				bwBinName <- gsub(".wig", ".bw", wigBinFile)
+
+				if (file.exists(wigBinFile) | file.exists(gzWigBinName) & file.exists(bwBinName)){
+					error.msg <- paste0("         ### WARNING: ", exp.name[i], " fixedStep WIG and BIGWIG file already exist.")
 					message(error.msg)
 					write(error.msg, log.path, append=TRUE)
+				} else if (file.exists(wigBinFile) | file.exists(gzWigBinName) & !file.exists(bwBinName)){
+					error.msg <- paste0("         ### WARNING: ", exp.name[i], " fixedStep WIG file already exists.")
+					message(error.msg)
+					write(error.msg, log.path, append=TRUE)
+					if (file.exists(wigBinFile)){
+						do.wigToBigWig(wig_file=wigBinFile, config_genomes=configuration$genomes, assemblyName=genome[i])
+					} else {
+						do.wigToBigWig(wig_file=gzWigBinName, config_genomes=configuration$genomes, assemblyName=genome[i])
+					}
 				} else {
 					if (fixedStepWigBin < 1e3){
 						file.out2 <- paste0(RDS.BIN.F, exp.name[i], "_bin_res_", fixedStepWigBin, "bp.rds")
@@ -1495,26 +1806,27 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 					}
 
 					bin.GR.fixedWig <- doBins(file=file.out2,  expname=exp.name[i], bin=fixedStepWigBin, reads=reads.all, assemblyName=genome[i], 
-					config_genomes=configuration$genomes, report=reportAnalysis, vpInfo=vpInfo)
+					config_genomes=configuration$genomes, report=reportAnalysis, vpInfo=vpInfo, log.path=log.path)
 
 					message("         ### Generation of fixedStep WIG file.")
-					exportWig(gR=bin.GR.fixedWig$bins, expName=exp.name[i], filename=wigBinFile, vpPos=vppos[i], vpChr=CHR, plotView=configuration$plotView, fixed=TRUE, bin=fixedStepWigBin)
+					exportWig(gR=bin.GR.fixedWig$bins, expName=exp.name[i], filename=wigBinFile, vpPos=vppos[i], vpChr=CHR, plotView=configuration$plotView, 
+						config_genomes=configuration$genomes, assemblyName=genome[i], fixed=TRUE, bin=fixedStepWigBin)
 				}
 			}
 		}
 
 		if (tsv == TRUE){
-			message("      >>> Creating
-			 TSV file <<<")
+			message("      >>> Creating TSV file <<<")
 
 			if (nonBlind){
-				tsvFile <- paste0(TSV.F, exp.name[i], "_nonblind_WIN",wSize,".tsv")
+				tsvFile <- paste0(TSV.F, exp.name[i], "_nonblind_WIN", wSize, ".tsv")
 			} else {
-				tsvFile <- paste0(TSV.F, exp.name[i],"_WIN",wSize ,".tsv")
+				tsvFile <- paste0(TSV.F, exp.name[i], "_WIN", wSize , ".tsv")
 			}
+			gzTSVName <- paste0(tsvFile, ".gz")
 
-			if (file.exists(tsvFile)){
-				error.msg <- paste("         ### WARNING: ", exp.name[i], " TSV file already exist.")
+			if (file.exists(tsvFile) | file.exists(gzTSVName)){
+				error.msg <- paste0("         ### WARNING: ", exp.name[i], " TSV file already exists.")
 				message(error.msg)
 				write(error.msg, log.path, append=TRUE)
 			} else {
@@ -1523,86 +1835,559 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 				} else {
 					reads.tsv <- reads.all[order(seqnames(reads.all),reads.all$pos)]
 				}
-
-				gzname<- paste0(tsvFile, ".gz")
-				gz1 <- gzfile(gzname, "w")
-				tsvdat <- data.frame(chr=seqnames(reads.tsv), start=start(reads.tsv), end=end(reads.tsv), pos=reads.tsv$pos, type=reads.tsv$type, fe_strand=reads.tsv$fe_strand,
-					fe_id=reads.tsv$fe_id, reads=reads.tsv$reads, normReads=reads.tsv$normReads, norm4C=reads.tsv$norm4C)
-				
-				write.table(tsvdat, file=gz1, append=FALSE, sep="\t", quote=FALSE, row.names=FALSE, col.names=TRUE)
-				close(gz1)
+				exportTSV(gR=reads.tsv, filename=tsvFile, merge=FALSE)
 			}
 		}
 
 		# PeakC analysis
 		if (peakC == TRUE){
 			message("      >>> PeakC analysis <<<")
-			bedFile = paste0(PEAKC.F, exp.name[i],"_peakC_peaks.bed")
-			bedFileRegion = paste0(PEAKC.F, exp.name[i],"_peakC_regions.bed")
+			bedFile = paste0(PEAKC.BED_BDG.F, exp.name[i], "_peakC_peaks.bed")
+			bedFileRegion = gsub("peakC_peaks", "peakC_regions", bedFile)
+			BedGraphPeakCFile = paste0(PEAKC.BED_BDG.F, exp.name[i],  "_peakC_peaks.bedGraph")
+			BedGraphFileRegion = gsub("peakC_peaks", "peakC_regions", BedGraphPeakCFile)
+			PeakCRdsFile = paste0(PEAKC.RDS.F, exp.name[i], "_peakC_results.rds")
 
-			if (file.exists(bedFile)){
-				error.msg <- paste("         ### WARNING: ", exp.name[i], " peakC analysis already exist.")
+			if (analysis[i] == "cis"){
+				reads <- reads.cis
+			} else {
+				reads <- reads.all
+			}
+
+			if (file.exists(PeakCRdsFile)){
+				error.msg <- paste0("         ### WARNING: ", exp.name[i], " peakC analysis already exists, continuing with the existing RDS file.")
 				message(error.msg)
 				write(error.msg, log.path, append=TRUE)
+				resPeakC <- readRDS(PeakCRdsFile)
+				VPpos <- resPeakC$vpPos
+				VPChr <- resPeakC$vpChr						
 			} else {
-				if (analysis[i] == "cis"){
-					reads <- reads.cis
-				} else {
-					reads <- reads.all
-				}
-				vppos <- vppos[i]
-				vpChr <- as.vector(CHR)
+				VPpos <- vppos[i]
+				VPChr <- as.vector(CHR)
 
-				zoom <- GRanges(seqnames=vpChr, resize(IRanges(vppos, vppos), width=vpRegion, fix="center"))
+				zoom <- GRanges(seqnames=VPChr, resize(IRanges(VPpos, VPpos), width=vpRegion, fix="center"))
 				vpGR <- reads[unique(queryHits(findOverlaps(reads,zoom)))]
 				peakCDat <- data.frame(pos=vpGR$pos,reads=vpGR$normReads)
 				
-				resPeakC <- suppressWarnings(single.analysis(data=peakCDat,vp.pos=vppos,wSize=wSize,qWd=qWd,qWr=qWr,minDist=minDist))
+				resPeakC <- suppressWarnings(single.analysis(data=peakCDat,vp.pos=VPpos,wSize=wSize,qWd=qWd,qWr=qWr,minDist=minDist))
 
-				resPeakC$vpPos <- vppos
-				resPeakC$vpChr <- vpChr
+				resPeakC$vpPos <- VPpos
+				resPeakC$vpChr <- VPChr
 
 				if(length(resPeakC$peak)>0){
-					resPeakC$exportPeakGR <- getPeakCPeaks(resPeakC=resPeakC, min.gapwidth=min.gapwidth)
+					resPeakC$exportPeakGR <- getPeakCPeaks(resPeakC=resPeakC, min.gapwidth=0)
 				} else {
 					resPeakC$exportPeakGR <- NULL
 				}
 
-				plotFile = paste0(PEAKC.PLOTS.F,"peakC_", exp.name[i],".pdf")
-				pdf(file=plotFile)
-				plot_C(data=resPeakC, num.exp = 1, y.min = 0, y.max = 750)
-				dev.off()
+				#Save peakC results
+				saveRDS(resPeakC, file=PeakCRdsFile)
+			}
 
-				exportPeakCPeaks(resPeakC=resPeakC, bedFile=bedFile, name=paste0(exp.name[i],"peakC_peaks"), desc=NULL, includeVP=TRUE, min.gapwidth=0)
-				exportPeakCPeaks(resPeakC=resPeakC, bedFile=bedFileRegion, name=paste0(exp.name[i],"peakC_peaks"), desc=NULL, includeVP=TRUE, min.gapwidth=5e3)
+			#Plot peakC results
+			plotFile = paste0(PEAKC.PLOTS.F,"peakC_", exp.name[i],".pdf")
+			pdf(file=plotFile)
+			plot_C(data=resPeakC, num.exp = 1, y.min = 0, y.max = 750)
+			dev.off()
 
+			#Export bed file
+			bedPeaks <- exportPeakCPeaks(resPeakC=resPeakC, bedFile=bedFile,
+				name=paste0(exp.name[i],"peakC_peaks"), desc=NULL, includeVP=TRUE, min.gapwidth=0)
+			bedregion <- exportPeakCPeaks(resPeakC=resPeakC, bedFile=bedFileRegion,
+				name=paste0(exp.name[i],"peakC_region"), desc=NULL, includeVP=TRUE, min.gapwidth=minGapwidth)
+
+			#export bedGraph
+			reads2 <- reads
+			ranges(reads2) <- reads2$pos
+			peakCReads <-  GRanges(seqnames=bedPeaks$chr, ranges=bedPeaks$start)
+			readsPeakC.bdg <- reads2[unique(queryHits(findOverlaps(reads2, peakCReads)))]
+			
+			peakCRegions <-  GRanges(seqnames=bedregion$chr, ranges=paste0(bedregion$start, "-", bedregion$end))
+			score <- c()
+			for (l in 1:length(peakCRegions)) {
+				tmp <- peakCRegions[l]
+				peaks <- as.data.frame(reads2[unique(queryHits(findOverlaps(reads2, tmp)))])
+				score <- c(score, median(peaks$norm4C))
+			}
+			regionsPeakC.bdg <- peakCRegions
+			regionsPeakC.bdg$norm4C <- score
+			rm(tmp, peaks, score)
+
+			exportBDG(gR=readsPeakC.bdg, expName=paste0(exp.name[i], "_peakC_peaks"), filename=BedGraphPeakCFile, 
+				vpPos=VPpos, vpChr=VPChr, plotView=configuration$plotView, interval=FALSE)
+			exportBDG(gR=regionsPeakC.bdg, expName=paste0(exp.name[i], "_peakC_regions"), filename=BedGraphFileRegion,
+				vpPos=VPpos, vpChr=VPChr, plotView=configuration$plotView, interval=TRUE)
+
+			#Preparing data to DESeq2 (recovery of all positive position per viewpoint)
+			if (DESeq2 == TRUE){
+				VP <- paste0(CHR, ":", vppos[i])
+				if (is.null(list_peakCPeaksPos_Per_VP[[VP]]) == TRUE){
+					dataReads <- as.data.frame(readsPeakC.bdg)
+					list_peakCPeaksPos_Per_VP[[VP]] <- paste0(dataReads$seqnames, ":", dataReads$start)
+				} else {
+					dataReads <- as.data.frame(readsPeakC.bdg)
+					dataReadsVP <- paste0(dataReads$seqnames, ":", dataReads$start)
+					list_peakCPeaksPos_Per_VP[[VP]] <- unique(c(list_peakCPeaksPos_Per_VP[[VP]], dataReadsVP))
+				}
+				if (is.null(list_peakCRegionsPos_Per_VP[[VP]]) == TRUE){
+					dataRegionsReads <- as.data.frame(regionsPeakC.bdg)
+					list_peakCRegionsPos_Per_VP[[VP]] <- paste0(dataRegionsReads$seqnames, ":", dataRegionsReads$start, "-", dataRegionsReads$end)
+				} else {
+					dataRegionsReads <- as.data.frame(regionsPeakC.bdg)
+					dataRegionsReadsVP <- paste0(dataRegionsReads$seqnames, ":", dataRegionsReads$start, "-", dataRegionsReads$end)
+					list_peakCRegionsPos_Per_VP[[VP]] <- unique(c(list_peakCRegionsPos_Per_VP[[VP]], dataRegionsReadsVP))
+				}
+			}
+			rm(peakCReads, readsPeakC.bdg, peakCRegions, regionsPeakC.bdg)		
+		}
+		message('\n')
+	}
+
+	if(replicates == TRUE){
+		message("\n------ Replicate analysis")
+		message("      >>> Recovery replicates informations <<<")
+		
+		to_process <- readConditions(vpInfo=VPinfo, log.path=log.path)
+		cond <- as.character(unique(VPinfo$condition))
+
+		for (k in cond){
+			message(paste0("      >>> Processing the condition: ", k, " <<<"))
+			for (z in 1:length(to_process[[k]])){
+				disabled = 0
+				expname <- as.vector(to_process[[k]][[z]])
+				ViewP <- names(to_process[[k]][z])
+				mergeExpname <- paste0(k, "_viewpoint_chr", ViewP)
+				num_replicates <- VPinfo[which(VPinfo$expname == expname), colnames(VPinfo) == "replicate"]
+				msg <-":"
+				for (t in expname){
+					msg <- paste0(msg, " | ", t)
+				}
+				message(paste0("         ### Experiment list to merge", msg ))
+				mergeRdsFile <- paste0(RDS.MERGE.F, "merge_condition_", mergeExpname, ".rds")
+				if (file.exists(mergeRdsFile)){
+					error.msg <- paste0("            *** WARNING: rds file ", mergeExpname, " already exists, continuing with existing file.")
+					write(error.msg, log.path, append=TRUE)
+					message(error.msg)
+					rds <- readRDS(mergeRdsFile)					
+					merge <- rds$reads
+					reportAnalysis <- rds$report					
+					vpInfo <- rds$vpInfo
+					expnameRDS <- vpInfo$name
+					rm(rds)
+					list_rdsFiles <- c()
+					for (y in 1:length(expnameRDS)) {
+						rdsFile <- paste0(RDS.F, expnameRDS[y], ".rds")
+						list_rdsFiles <- c(list_rdsFiles, rdsFile)
+					}
+				} else {
+					list_rdsFiles <- c()
+					n=0
+					for (y in 1:length(expname)) {
+						rdsFile <- paste0(RDS.F, expname[y], ".rds")
+						rep <- num_replicates[y]
+						tmpRDS <- readRDS(rdsFile)
+						replicateName <- paste0("rep", rep)
+						if (y == 1) {
+							merge <- tmpRDS$reads[,c("pos", "type", "fe_strand", "fe_id", "unique", "normReads", "norm4C")]
+							colnames(elementMetadata(merge))[6] <- paste0("normReads_", replicateName)
+							colnames(elementMetadata(merge))[7] <- paste0("norm4C_", replicateName)
+							tmp <- as.data.frame(merge[,6:7])
+							normRead <- as.data.frame(tmp[, 6])
+							readsNorm4C <- as.data.frame(tmp[, 7])
+							vpInfo <- tmpRDS$vpInfo
+							reportAnalysis <- tmpRDS$report
+						} else {
+							numCol <- 5 + y + n
+							merge$tmp <- tmpRDS$reads$normReads
+							merge$tmp2 <- tmpRDS$reads$norm4C
+							colnames(elementMetadata(merge))[numCol] <- paste0("normReads_", replicateName)
+							colnames(elementMetadata(merge))[numCol+1] <- paste0("norm4C_", replicateName)
+							tmp <- as.data.frame(merge[, numCol:(numCol+1)])
+							normRead <- cbind(normRead, as.data.frame(tmp[, 6]))
+							readsNorm4C <- cbind(readsNorm4C, as.data.frame(tmp[, 7]))
+							vpInfo <- rbind(vpInfo, tmpRDS$vpInfo)
+							reportAnalysis <- rbind(reportAnalysis, tmpRDS$report)
+						}
+						n=n+1
+						list_rdsFiles <- c(list_rdsFiles, rdsFile)
+						rm(tmpRDS)
+					}
+
+					if (length(unique(vpInfo$analysis)) != 1){
+						error.msg <- paste0("            *** ERROR: ", msg, " files present different type of analysis (cis and all). Please uniform the analysis type between these replicates.")
+						message("            *** Skipping replicates")
+						write(error.msg, log.path, append=TRUE)
+						message(error.msg)
+						next
+					}
+
+					message("            ***  Merging normalized reads per fragment")
+					#### Median as peakC package do for the plot_c function...
+					merge$normReads <- apply(normRead, 1, median)
+					merge$norm4C <- apply(readsNorm4C, 1, median)
+
+					saveRDS(list(reads=merge, report=reportAnalysis, vpInfo=vpInfo, run.par=run.par), file=mergeRdsFile)
+				}
+				
+				if (unique(vpInfo$analysis) == "cis") {
+					disabled <- 1
+				}
+
+				if (bins == TRUE | make.gwplot == TRUE & disabled == 0){
+					message("            *** Creating bins")	
+					if (configuration$binSize < 1e3){
+						file.out <- paste0(RDS.BIN.F, "merge_condition_", mergeExpname, "_bin_res_", configuration$binSize, "bp.rds")
+					} else {
+						file.out <- paste0(RDS.BIN.F, "merge_condition_", mergeExpname, "_bin_res_", (configuration$binSize/1e3), "kb.rds")
+					}				
+					bin.GR <- doBins(file=file.out,  expname=mergeExpname, bin=configuration$binSize , reads=merge, assemblyName=unique(vpInfo$genome), 
+						config_genomes=configuration$genomes, report=reportAnalysis, vpInfo=vpInfo, log.path=log.path)
+				}
+
+				# Merge Plot
+				if (make.cisplot == TRUE){
+					message("            *** Creating local 4C Plot")
+					createPlot(plotTitle=mergeExpname, vpPos=unique(vpInfo$pos), chromosome=unique(vpInfo$chr), fragGR=merge[as.vector(seqnames(merge)) == unique(vpInfo$chr)], 
+						plotLegend=reportAnalysis, plotView=configuration$plotView,	maxY=configuration$maxY, minY=0, xaxisUnit=configuration$xaxisUnit, plotRegion='cis', 
+						foldOut=PLOT.MERGE.F, plotType=configuration$plotType)
+				}
+
+				if (disabled == 0 & make.gwplot == TRUE){
+					message("            *** Creating genome-wide 4C coverage Plot")
+					createPlot(plotTitle=mergeExpname, vpPos=unique(vpInfo$pos), chromosome=unique(vpInfo$chr), fragGR=bin.GR, plotLegend=reportAnalysis, plotView=configuration$plotView,
+						maxY=configuration$maxY, minY=0, xaxisUnit=configuration$xaxisUnit, plotRegion='all', foldOut=GENOMEPLOT.MERGE.F, plotType=configuration$plotType)
+				}
+
+				#Export data
+				if (make.bdg == TRUE){
+					message("            *** Creating bedGraph file")
+
+					if (nonBlind){
+						mergebdgFile <- paste0(BDG.MERGE.F, "merge_condition_", mergeExpname, "_nonblind_WIN",wSize,".bedGraph")
+					} else {
+						mergebdgFile <- paste0(BDG.MERGE.F, "merge_condition_", mergeExpname, "_WIN", wSize ,".bedGraph")
+					}
+					gzMergeBDGName <- paste0(mergebdgFile, ".gz")
+
+					if (file.exists(mergebdgFile) | file.exists(gzMergeBDGName)){
+						error.msg <- paste0("               --- WARNING: merge_condition_", mergeExpname, " bedGraph file already exists.")
+						message(error.msg)
+						write(error.msg, log.path, append=TRUE)
+					} else {
+						if (unique(vpInfo$analysis) == "cis"){
+							mergeReads.bdg <- merge[order(merge$pos)]
+						} else {
+							mergeReads.bdg <- merge[order(seqnames(merge), merge$pos)]
+						}
+						message("               --- Generation of bedGraph file.")
+						exportBDG(gR=mergeReads.bdg, expName=mergeExpname, filename=mergebdgFile, vpPos=unique(vpInfo$pos), 
+							vpChr=unique(vpInfo$chr), plotView=configuration$plotView, interval=FALSE)
+					}
+				}
+
+				if (make.wig == TRUE){
+					message("            *** Creating WIG file")
+
+					if (nonBlind){
+						mergeWigFile <- paste0(WIG.MERGE.F, "merge_condition_", mergeExpname, "_nonblind_WIN", wSize,".wig")
+					} else {
+						mergeWigFile <- paste0(WIG.MERGE.F, "merge_condition_", mergeExpname, "_WIN", wSize ,".wig")
+					}
+					gzMergeWigName <- paste0(mergeWigFile, ".gz")
+					bwMergeName <- gsub(".wig", ".bw", mergeWigFile)
+
+					if (file.exists(mergeWigFile) | file.exists(gzMergeWigName) & file.exists(bwMergeName)){
+						error.msg <- paste0("               --- WARNING: merge_condition_", mergeExpname, " WIG and BIGWIG files already exist.")
+						message(error.msg)
+						write(error.msg, log.path, append=TRUE)
+					} else if (file.exists(mergeWigFile) | file.exists(gzMergeWigName) & !file.exists(bwMergeName)){
+						error.msg <- paste0("               --- WARNING: merge_condition_", mergeExpname, " WIG file already exists.")
+						message(error.msg)
+						write(error.msg, log.path, append=TRUE)
+						if (file.exists(mergeWigFile)){
+							do.wigToBigWig(wig_file=mergeWigFile, config_genomes=configuration$genomes, assemblyName=unique(vpInfo$genome))
+						} else {
+							do.wigToBigWig(wig_file=gzMergeWigName, config_genomes=configuration$genomes, assemblyName=unique(vpInfo$genome))
+						}				
+					} else {
+						if (unique(vpInfo$analysis) == "cis"){
+							mergeReads.wig <- merge[order(merge$pos)]
+						} else {
+							mergeReads.wig <- merge[order(seqnames(merge), merge$pos)]
+						}
+						message("               --- Generation of variableStep WIG file.")
+						exportWig(gR=mergeReads.wig, expName=mergeExpname, filename=mergeWigFile, vpPos=unique(vpInfo$pos), vpChr=unique(vpInfo$chr),
+							plotView=configuration$plotView, config_genomes=configuration$genomes, assemblyName=unique(vpInfo$genome), fixed=FALSE)
+					}
+
+					if (make.fixedStep & disabled == 0){
+						if (nonBlind){
+							mergeWigBinFile <- paste0(WIG.MERGE.F, "merge_condition_", mergeExpname, "_nonblind_BIN_", fixedStepWigBin, ".wig")
+						} else {
+							mergeWigBinFile <- paste0(WIG.MERGE.F, "merge_condition_", mergeExpname, "_BIN", fixedStepWigBin, ".wig")
+						}
+
+						gzMergeWigBinName <- paste0(mergeWigBinFile, ".gz")
+						bwMergeBinName <- gsub(".wig", ".bw", mergeWigBinFile)
+
+						if (file.exists(mergeWigBinFile) | file.exists(gzMergeWigBinName) & file.exists(bwMergeBinName)){
+							error.msg <- paste("               --- WARNING: ", mergeExpname, " fixedStep WIG and BIGWIG file already exist.")
+							message(error.msg)
+							write(error.msg, log.path, append=TRUE)
+						} else if (file.exists(mergeWigBinFile) | file.exists(gzMergeWigBinName) & !file.exists(bwMergeBinName)){
+							error.msg <- paste0("               --- WARNING: ", mergeExpname, " fixedStep WIG file already exists.")
+							message(error.msg)
+							write(error.msg, log.path, append=TRUE)
+							if (file.exists(mergeWigBinFile)){
+								do.wigToBigWig(wig_file=mergeWigBinFile, config_genomes=configuration$genomes, assemblyName=unique(vpInfo$genome))
+							} else {
+								do.wigToBigWig(wig_file=gzMergeWigBinName, config_genomes=configuration$genomes, assemblyName=unique(vpInfo$genome))
+							}
+						} else {
+							if (fixedStepWigBin < 1e3){
+								mergeBinReads.wig <- paste0(RDS.BIN.MERGE.F, "merge_condition_", mergeExpname, "_bin_res_", fixedStepWigBin, "bp.rds")
+							} else {
+								mergeBinReads.wig <- paste0(RDS.BIN.MERGE.F, "merge_condition_", mergeExpname, "_bin_res_", (fixedStepWigBin/1e3), "kb.rds")
+							}
+
+							bin.GR.fixedWig <- doBins(file=mergeBinReads.wig,  expname=mergeExpname, bin=fixedStepWigBin, reads=merge, assemblyName=unique(vpInfo$genome), 
+							config_genomes=configuration$genomes, report=reportAnalysis, vpInfo=vpInfo, log.path=log.path)
+
+							message("               --- Generation of fixedStep WIG file.")
+							exportWig(gR=bin.GR.fixedWig$bins, expName=mergeExpname, filename=mergeWigBinFile, vpPos=unique(vpInfo$pos), vpChr=unique(vpInfo$chr), 
+								plotView=configuration$plotView, config_genomes=configuration$genomes, assemblyName=unique(vpInfo$genome), fixed=TRUE, bin=fixedStepWigBin)
+						}
+					}
+				}
+
+				if (tsv == TRUE){
+					message("            *** Creating TSV file")
+
+					if (nonBlind){
+						mergeTsvFile <- paste0(TSV.MERGE.F, "merge_condition_", mergeExpname, "_nonblind_WIN", wSize,".tsv")
+					} else {
+						mergeTsvFile <- paste0(TSV.MERGE.F, "merge_condition_", mergeExpname, "_WIN", wSize ,".tsv")
+					}
+					gzMergeTSVName <- paste0(mergeTsvFile, ".gz")
+
+					if (file.exists(mergeTsvFile) | file.exists(gzMergeTSVName)){
+						error.msg <- paste0("               --- WARNING: merge_condition_", mergeExpname, " TSV file already exists.")
+						message(error.msg)
+						write(error.msg, log.path, append=TRUE)
+					} else {
+						if (unique(vpInfo$analysis) == "cis"){
+							mergeReads.tsv <- merge[order(merge$pos)]
+						} else {
+							mergeReads.tsv <- merge[order(seqnames(merge), merge$pos)]
+						}
+						exportTSV(gR=mergeReads.tsv, filename=mergeTsvFile, merge=TRUE)
+					}
+				}
+
+				# PeakC analysis
+				if (peakC == TRUE){
+					message("            *** PeakC analysis")
+					mergeBedFile = paste0(PEAKC.BED_BDG.F, "merge_condition_", mergeExpname, "_peakC_peaks.bed")
+					mergeBedFileRegion = gsub("peakC_peaks", "peakC_regions", mergeBedFile)
+					mergeBedGraphPeakCFile = paste0(PEAKC.BED_BDG.F, "merge_condition_", mergeExpname, "_peakC_peaks.bedGraph")
+					mergeBedGraphPeakCFileRegion = gsub("peakC_peaks", "peakC_regions", mergeBedGraphPeakCFile)
+					mergePeakCRdsFile = paste0(PEAKC.RDS.F, "merge_condition_", mergeExpname, "_peakC_results.rds")
+
+					if (file.exists(mergePeakCRdsFile)){
+						error.msg <- paste("               --- WARNING: merge_condition_", mergeExpname, " peakC analysis already exists, continuing with the existing RDS file.")
+						message(error.msg)
+						write(error.msg, log.path, append=TRUE)
+						mergeResPeakC <- readRDS(mergePeakCRdsFile)
+						VPpos <- mergeResPeakC$vpPos
+						VPChr <- mergeResPeakC$vpChr
+					} else {
+						num.exp <- length(expname)
+						VPpos <- unique(vpInfo$pos)
+						VPChr <- unique(vpInfo$chr)
+
+						zoom <- GRanges(seqnames=VPChr, resize(IRanges(VPpos, VPpos), width=vpRegion, fix="center"))
+						vpGR <- merge[unique(queryHits(findOverlaps(merge, zoom)))]
+
+						mergePeakCDat <- list()
+						for (f in 1:num.exp) {
+							column <- paste0("normReads_rep", f)
+							data <- as.data.frame(vpGR[, c("pos", column)])
+							colnames(data)[7] <- "reads"
+							mergePeakCDat[[f]] <- data.frame(pos=data$pos, reads=data$reads)
+						}
+
+						mergeResPeakC <- suppressWarnings(combined.analysis(data=mergePeakCDat, num.exp=num.exp, vp.pos=VPpos, wSize=wSize, 
+							alphaFDR=alphaFDR, qWr=qWr, minDist=minDist))
+
+						mergeResPeakC$vpPos <- VPpos
+						mergeResPeakC$vpChr <- VPChr
+
+						if(length(mergeResPeakC$peak)>0){
+							mergeResPeakC$exportPeakGR <- getPeakCPeaks(resPeakC=mergeResPeakC, min.gapwidth=0)
+						} else {
+							mergeResPeakC$exportPeakGR <- NULL
+						}
+
+						#Save peakC results
+						saveRDS(mergeResPeakC, file=mergePeakCRdsFile)
+					}
+
+					#Plot peakC results
+					plotFile = paste0(PEAKC.PLOTS.F, "merge_condition_", mergeExpname,".pdf")
+					pdf(file=plotFile)
+					plot_C(data=mergeResPeakC, num.exp = 1, y.min = 0, y.max = 750)
+					dev.off()
+
+					#Export bed file
+					mergeBedPeaks <- exportPeakCPeaks(resPeakC=mergeResPeakC, bedFile=mergeBedFile, 
+						name=paste0("merge_condition_", mergeExpname,"peakC_peaks"), desc=NULL, includeVP=TRUE, min.gapwidth=0)
+					mergeBedRegions <- exportPeakCPeaks(resPeakC=mergeResPeakC, bedFile=mergeBedFileRegion, 
+						name=paste0("merge_condition_", mergeExpname,"peakC_region"), desc=NULL, includeVP=TRUE, min.gapwidth=minGapwidth)
+
+					#export bedGraph
+					merge2 <- merge
+					ranges(merge2) <- merge2$pos
+					peakCReads <-  GRanges(seqnames=mergeBedPeaks$chr, ranges=mergeBedPeaks$start)
+					mergeReadsPeakC.bdg <- merge2[unique(queryHits(findOverlaps(merge2, peakCReads)))]
+					
+					peakCRegions <-  GRanges(seqnames=mergeBedRegions$chr, ranges=paste0(mergeBedRegions$start, "-", mergeBedRegions$end))
+					score <- c()
+					for (l in 1:length(peakCRegions)) {
+						tmp <- peakCRegions[l]
+						peaks <- as.data.frame(merge2[unique(queryHits(findOverlaps(merge2, tmp)))])
+						score <- c(score, median(peaks$norm4C))
+					}
+					mergeRegionPeakC.bdg <- peakCRegions
+					mergeRegionPeakC.bdg$norm4C <- score
+					rm(tmp, peaks, score)
+					
+					exportBDG(gR=mergeReadsPeakC.bdg, expName=paste0(mergeExpname, "_peakC_peaks"), filename=mergeBedGraphPeakCFile, 
+						vpPos=VPpos, vpChr=VPChr, plotView=configuration$plotView, interval=FALSE)
+					exportBDG(gR=mergeRegionPeakC.bdg, expName=paste0(mergeExpname, "_peakC_regions"), filename=mergeBedGraphPeakCFileRegion,
+						vpPos=VPpos, vpChr=VPChr, plotView=configuration$plotView, interval=TRUE)
+
+					#Preparing data to DESeq2 (recovery of all positive position per viewpoint)
+					if (DESeq2 == TRUE){
+						VP <- paste0("chr", gsub("-", ":", ViewP))
+						if (is.null(list_peakCMergePeaksPos_Per_VP[[VP]]) == TRUE){
+							dataReads <- as.data.frame(mergeReadsPeakC.bdg)
+							list_peakCMergePeaksPos_Per_VP[[VP]] <- paste0(dataReads$seqnames, ":", dataReads$start)
+						} else {
+							dataReads <- as.data.frame(mergeReadsPeakC.bdg)
+							dataReadsVP <- paste0(dataReads$seqnames, ":", dataReads$start)
+							list_peakCMergePeaksPos_Per_VP[[VP]] <- unique(c(list_peakCMergePeaksPos_Per_VP[[VP]], dataReadsVP))
+						}
+						if (is.null(list_peakCMergeRegionsPos_Per_VP[[VP]]) == TRUE){
+							dataRegionsReads <- as.data.frame(mergeRegionPeakC.bdg)
+							list_peakCMergeRegionsPos_Per_VP[[VP]] <- paste0(dataRegionsReads$seqnames, ":", dataRegionsReads$start, "-", dataRegionsReads$end)
+						} else {
+							dataRegionsReads <- as.data.frame(mergeRegionPeakC.bdg)
+							dataRegionsReadsVP <- paste0(dataRegionsReads$seqnames, ":", dataRegionsReads$start, "-", dataRegionsReads$end)
+							list_peakCMergeRegionsPos_Per_VP[[VP]] <- unique(c(list_peakCMergeRegionsPos_Per_VP[[VP]], dataRegionsReadsVP))
+						}
+					}
+					rm(peakCReads, mergeReadsPeakC.bdg, peakCRegions,mergeRegionPeakC.bdg)				
+				}
 			}
 		}
 		message('\n')
 	}
 
+	if (peakC == TRUE & DESeq2 == TRUE){
+		message("\n------ DESeq2 analysis")
+		VP <- unique(paste0("chr", vpChr, ":", vppos))
+		for (r in VP) {
+			message(paste0("      >>> Analysis on experiments with the viewpoint ", r," <<<"))
+			ViewP <- unlist(strsplit(r, ":"))
+			subVPinfo <- VPinfo[which(VPinfo$vpchr == gsub("chr","", ViewP[1]) & VPinfo$vppos == ViewP[2]),]
+			cond <- unique(subVPinfo$condition)
 
-	if(replicates == TRUE){
-		message("\n------ Fusion replicates")
-		cond <- as.character(unique(condition_list))
+			if (length(cond) < 2){
+				error.msg <- paste0("         ### WARNING: experiment(s) with the viewpoint ", r, " present only one condition: ", cond,".")
+				write(error.msg, log.path, append=TRUE)
+				message(error.msg)
+				next
+			}
+			DIR.OUT <- paste0(PEAKC.DESeq2.F, ViewP[1], "-", ViewP[2], "/")
+			logDirs[[r]] <- ifelse(!dir.exists(DIR.OUT), dir.create(DIR.OUT), FALSE)
+
+			matrixPeaksName <- paste0(DIR.OUT, "matrix_peaksPeakC_", ViewP[1], "-", ViewP[2], ".txt")
+			if (file.exists(matrixPeaksName)){
+				error.msg <- paste0("         ### WARNING: a peakC peaks matrix file for experiments with the viewpoint ", 
+					r, "  already exists, continuing with the existing matrix.")
+				write(error.msg, log.path, append=TRUE)
+				message(error.msg)
+				matrix_peaks <- read.table(file=matrixPeaksName, sep="\t", header=TRUE, stringsAsFactors = FALSE, row.name=1)
+			} else {
+				message("         ### Creation of matrix with peakC all significant peaks for DESeq2 analysis")
+				positive_peaks <- GRanges(sort(list_peakCPeaksPos_Per_VP[[r]]))
+				matrix_peaks <- make.DESeq2matrix(subVPinfo=subVPinfo, gR_positivePeaks=positive_peaks, pathToRDS=RDS.F, region=FALSE, merge=FALSE)
+				write.table(matrix_peaks, file=matrixPeaksName, sep = "\t", quote= FALSE, row.names=TRUE, col.names = TRUE)
+			}
+
+			matrixRegionsName <- paste0(DIR.OUT, "matrix_regionsPeakC_", ViewP[1], "-", ViewP[2], ".txt")
+			if (file.exists(matrixRegionsName)){
+				error.msg <- paste0("         ### WARNING: a peakC region matrix file for experiments with the viewpoint ", 
+					r, "  already exists, continuing with the existing matrix.")
+				write(error.msg, log.path, append=TRUE)
+				message(error.msg)
+				matrix_regions <- read.table(file=matrixRegionsName, sep="\t", header=TRUE, stringsAsFactors = FALSE, row.name=1)
+			} else {
+				message("         ### Creation of matrix with peakC all significant regions for DESeq2 analysis")
+				positive_regions <- reduce(GRanges(sort(list_peakCRegionsPos_Per_VP[[r]])))			
+				matrix_regions <- make.DESeq2matrix(subVPinfo=subVPinfo, gR_positivePeaks=positive_regions, pathToRDS=RDS.F, region=TRUE, merge=FALSE)			
+				write.table(matrix_regions, file=matrixRegionsName, sep = "\t", quote= FALSE, row.names=TRUE, col.names = TRUE)
+			}
+
+			message("         ### Perfoming DESeq2 analysis on peakC significant peaks in at least one replicate")
+			do.deseq2(matrix=matrix_peaks, metadata=subVPinfo, output=DIR.OUT, expname=paste0("peakC_peaks_", r), ctrlCondition=ctrl)
+
+			message("         ### Perfoming DESeq2 analysis on peakC significant regions in at least one replicate\n")
+			do.deseq2(matrix=matrix_regions, metadata=subVPinfo, output=DIR.OUT, expname=paste0("peakC_regions_", r), ctrlCondition=ctrl)
 
 
+			if (replicates ==TRUE){
+				matrixMergePeaksName <- paste0(DIR.OUT, "matrix_allReplicates_peaksPeakC_", ViewP[1], "-", ViewP[2], ".txt")
+				if (file.exists(matrixMergePeaksName)){
+					error.msg <- paste0("         ### WARNING: a merged peakC peaks matrix file for experiments with the viewpoint ", 
+						r, "  already exists, continuing with the existing matrix.")
+					write(error.msg, log.path, append=TRUE)
+					message(error.msg)
+					matrix_mergePeaks <- read.table(file=matrixMergePeaksName, sep="\t", header=TRUE, stringsAsFactors = FALSE, row.name=1)
+				} else {
+					message("         ### Creation of matrix with peakC significant peaks (in all replicates) for DESeq2 analysis")
+					positive_mergePeaks <- GRanges(sort(list_peakCMergePeaksPos_Per_VP[[r]]))
+					matrix_mergePeaks <- make.DESeq2matrix(subVPinfo=subVPinfo, gR_positivePeaks=positive_mergePeaks,
+						pathToRDS=RDS.F, region=FALSE, merge=FALSE)
+					write.table(matrix_mergePeaks, file=matrixMergePeaksName, sep = "\t", quote= FALSE, row.names=TRUE, col.names = TRUE)
+				}
 
+				matrixMergeRegionsName <- paste0(DIR.OUT, "matrix_allReplicates_regionsPeakC_", ViewP[1], "-", ViewP[2], ".txt")
+				if (file.exists(matrixMergeRegionsName)){
+					error.msg <- paste0("         ### WARNING: a merged peakC region matrix file for experiments with the viewpoint ", 
+						r, "  already exists, continuing with the existing matrix.")
+					write(error.msg, log.path, append=TRUE)
+					message(error.msg)
+					matrix_mergeRegions <- read.table(file=matrixMergeRegionsName, sep="\t", header=TRUE, stringsAsFactors = FALSE, row.name=1)
+				} else {
+					message("         ### Creation of matrix with peakC significant regions (in all replicates) for DESeq2 analysis")
+					positive_mergeRegions <- reduce(GRanges(sort(list_peakCMergeRegionsPos_Per_VP[[r]])))		
+					matrix_mergeRegions <- make.DESeq2matrix(subVPinfo=subVPinfo, gR_positivePeaks=positive_mergeRegions,
+						pathToRDS=RDS.F, region=TRUE, merge=FALSE)		
+					write.table(matrix_mergeRegions, file=matrixMergeRegionsName, sep = "\t", quote= FALSE, row.names=TRUE, col.names = TRUE)
+				}
 
+				message("         ### Perfoming DESeq2 analysis on peakC significant peaks in all replicates")
+				do.deseq2(matrix=matrix_mergePeaks, metadata=subVPinfo, output=DIR.OUT, expname=paste0("allReplicates_peakC_peaks_", r), ctrlCondition=ctrl)
 
-		if (peakC == TRUE){
-
-
-
-
+				message("         ### Perfoming DESeq2 analysis on peakC significant regions in all replicates")
+				do.deseq2(matrix=matrix_mergeRegions, metadata=subVPinfo, output=DIR.OUT, expname=paste0("allReplicates_peakC_regions_", r), ctrlCondition=ctrl)
+			}
 		}
-
-
-
-		#rdsFile<-paste0(RDS.F, exp.name[i], ".rds")
+		message("\n")
 	}
 
 	#make report from all RDS files
 	message("------ Writing final report\n")
-	export.report(RDS.F, OUTPUT.F)
+	export.report(RDS.F=RDS.F, OUTPUT.F=OUTPUT.F, logname=LOGNAME)
 }
