@@ -1,4 +1,4 @@
-VERSION <- '1.10'
+VERSION <- '1.50'
 
 get_script_path <- function(path=NULL) {
 	if(is.null(path)){
@@ -66,6 +66,8 @@ option_list = list(
 							help="qWr for the peakC analysis.",metavar="number"),
 	make_option(c("-md", "--minDist"), type="integer", default=NULL,
 							help="minDist for the peakC analysis.",metavar="number"),
+	make_option(c("-mg", "--min.gapwidth"), type="integer", default=NULL,
+							help="min distance between significative peakC peaks to create 2 different regions of interaction.",metavar="number"),
 	make_option(c("-fs", "--fixedStepWigBin"), type="integer", default=NULL,
 							help="bin to use to write the fixedStep Wig file.",metavar="number"),
 
@@ -98,6 +100,8 @@ option_list = list(
 
 	make_option(c("-pe", "--peakC"), action="store_true", default=FALSE, 
 							help="Perform peakC analysis."),
+	make_option(c("-de", "--DESeq2"), action="store_true", default=FALSE, 
+							help="Perform DESeq2 analysis on peakC results."),
 	make_option(c("-rep", "--replicates"), action="store_true", default=FALSE, 
 							help="take in count replicates for peakC and output files.")
 
@@ -135,7 +139,7 @@ if(!suppressMessages(require("GenomicAlignments", character.only=TRUE))) stop("P
 if(!suppressMessages(require("caTools", character.only=TRUE))) stop("Package not found: caTools")
 if(!suppressMessages(require("config", character.only=TRUE))) stop("Package not found: config")
 if(!suppressMessages(require("rtracklayer", character.only=TRUE))) stop("Package not found: rtracklayer")
-if(!suppressMessages(require("peakC", character.only=TRUE))) stop("Package not found: peakC")
+if(!suppressMessages(require("dplyr", character.only=TRUE))) stop("Package not found: dyplr")
 
 source(sub(pattern='pipe4C\\.R', replacement='functions\\.R', x=get_script_path()))
 
@@ -187,6 +191,9 @@ if (!is.null(argsL$qWr)){
 if (!is.null(argsL$minDist)){
 	configOpt$minDist<-argsL$minDist
 }
+if (!is.null(argsL$min.gapwidth)){
+	configOpt$min.gapwidth<-argsL$min.gapwidth
+}
 if (!is.null(argsL$fixedStepWigBin)){
 	configOpt$fixedStepWigBin<-argsL$fixedStepWigBin
 }
@@ -231,6 +238,9 @@ if (argsL$chrM){
 
 if (argsL$peakC){
 	configOpt$peakC<-argsL$peakC
+}
+if (argsL$DESeq2){
+	configOpt$DESeq2<-argsL$DESeq2
 }
 if (argsL$replicates){
 	configOpt$replicates<-argsL$replicates
