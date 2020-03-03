@@ -874,7 +874,7 @@ make.reads.and.bins <- function(reads, assemblyName, res=25e3, config_genomes, s
 
 doBins <- function(file, expname, bin, reads, assemblyName, config_genomes, report, vpInfo, log.path){
 	if (nrow(vpInfo) != 1){
-		spacer = "                 "
+		spacer = "               "
 		msg <- paste0(spacer, "--- ")
 	} else {
 		spacer = "           "
@@ -1213,12 +1213,12 @@ make.DESeq2matrix <- function(subVPinfo, gR_positivePeaks, pathToRDS, region=FAL
 	num_column = 1
 	for (k in cond) {
 		if (merge == TRUE){
-			VP <- paste0("chr", unique(subVPinfo[which(subVPinfo$condition == k), colnames(VPinfo) == "vpchr"]), 
-				"-", unique(subVPinfo[which(subVPinfo$condition == k), colnames(VPinfo) == "vppos"]))
+			VP <- paste0("chr", unique(subVPinfo[which(subVPinfo$condition == k), colnames(subVPinfo) == "vpchr"]), 
+				"-", unique(subVPinfo[which(subVPinfo$condition == k), colnames(subVPinfo) == "vppos"]))
 			expname <- paste0("merge_condition_", k, "_viewpoint_", VP)
 		} else {
-			expname <- subVPinfo[which(subVPinfo$condition == k), colnames(VPinfo) == "expname"]
-			num_replicates <- subVPinfo[which(subVPinfo$condition == k), colnames(VPinfo) == "replicate"]
+			expname <- subVPinfo[which(subVPinfo$condition == k), colnames(subVPinfo) == "expname"]
+			num_replicates <- subVPinfo[which(subVPinfo$condition == k), colnames(subVPinfo) == "replicate"]
 		}
 
 		for (y in 1:length(expname)) {
@@ -1267,7 +1267,7 @@ do.deseq2 <- function(matrix, metadata, output, expname, ctrlCondition){
 	for (i in 1:ncol(matrix)){
 		matrix[,i] <- as.integer(matrix[,i])
 	}
-	metadata <- subVPinfo[order(metadata$condition), ]
+	metadata <- metadata[order(metadata$condition), ]
 	metadata$condition <- as.factor(metadata$condition)
 	cond <- unique(metadata$condition)
 
@@ -1414,49 +1414,49 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 	}
 	write.table(VPinfo, paste0(OUTPUT.F, "/VPinfo.txt"), sep="\t", row.names=FALSE, quote=F)
 
-	if (replicates == TRUE){
+	if (replicates){
 		logDirs$rdsMergeFolder <- ifelse(!dir.exists(RDS.MERGE.F), dir.create(RDS.MERGE.F), FALSE)
 		logDirs$rdsbinMergeFolder <- ifelse(!dir.exists(RDS.BIN.MERGE.F), dir.create(RDS.BIN.MERGE.F), FALSE)
 	}
 
-	if (make.cisplot == TRUE){
+	if (make.cisplot){
 		logDirs$plotFolder <- ifelse(!dir.exists(PLOT.F), dir.create(PLOT.F), FALSE)
-		if(replicates == TRUE){
+		if(replicates){
 			logDirs$plotMergeFolder <- ifelse(!dir.exists(PLOT.MERGE.F), dir.create(PLOT.MERGE.F), FALSE)
 		}
 	}
-	if (make.bdg == TRUE){
+	if (make.bdg){
 		logDirs$bdgFolder <- ifelse(!dir.exists(BDG.F), dir.create(BDG.F), FALSE)
-		if(replicates == TRUE){
+		if(replicates){
 			logDirs$bdgMergeFolder <- ifelse(!dir.exists(BDG.MERGE.F), dir.create(BDG.MERGE.F), FALSE)
 		}
 	}
-	if (make.wig == TRUE){
+	if (make.wig){
 		logDirs$wigFolder <- ifelse(!dir.exists(WIG.F), dir.create(WIG.F), FALSE)
-		if(replicates == TRUE){
+		if(replicates){
 			logDirs$wigMergeFolder <- ifelse(!dir.exists(WIG.MERGE.F), dir.create(WIG.MERGE.F), FALSE)
 		}
 	}
 	if(any(VPinfo$analysis == 'all') & make.gwplot){
 		logDirs$genomeplotFolder <- ifelse(!dir.exists(GENOMEPLOT.F), dir.create(GENOMEPLOT.F), FALSE)
-		if(replicates == TRUE){
+		if(replicates){
 			logDirs$genomeplotMergeFolder <- ifelse(!dir.exists(GENOMEPLOT.MERGE.F), dir.create(GENOMEPLOT.MERGE.F), FALSE)
 		}
 	}
-	if (tsv == TRUE){
+	if (tsv){
 		logDirs$tsvFolder <- ifelse(!dir.exists(TSV.F), dir.create(TSV.F), FALSE)
 		if(replicates == TRUE){
 			logDirs$tsvMergeFolder <- ifelse(!dir.exists(TSV.MERGE.F), dir.create(TSV.MERGE.F), FALSE)
 		}
 	}
-	if (peakC == TRUE){
+	if (peakC){
 		if(!suppressMessages(require("peakC", character.only=TRUE))) stop("Package not found: peakC")
 		if(!suppressMessages(require("isotone", character.only=TRUE))) stop("Package not found: isotone")
 		logDirs$peakcFolder <- ifelse(!dir.exists(PEAKC.F), dir.create(PEAKC.F), FALSE)
 		logDirs$peakcFolderPlots <- ifelse(!dir.exists(PEAKC.PLOTS.F), dir.create(PEAKC.PLOTS.F), FALSE)
 		logDirs$peakcFolderBED_BDG <- ifelse(!dir.exists(PEAKC.BED_BDG.F), dir.create(PEAKC.BED_BDG.F), FALSE)
 		logDirs$peakcFolderRDS <- ifelse(!dir.exists(PEAKC.RDS.F), dir.create(PEAKC.RDS.F), FALSE)
-		if (DESeq2 == TRUE){
+		if (DESeq2){
 			if(!suppressMessages(require("DESeq2", character.only=TRUE))) stop("Package not found: DESeq2")
 			if(!suppressMessages(require("ggplot2", character.only=TRUE))) stop("Package not found: ggplot2")
 			if(!suppressMessages(require("ggrepel", character.only=TRUE))) stop("Package not found: ggrepel")
@@ -1514,10 +1514,10 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 	message(" +++ Demultiplexing Fastq files based on VPinfo file +++")
 	demux.FASTQ(VPinfo=VPinfo, FASTQ.F=FASTQ.F, FASTQ.demux.F=FASTQ.demux.F, demux.log.path=demux.log.path, mmMax = mmMax)
 
-	if (peakC == TRUE & DESeq2 == TRUE){
+	if (peakC & DESeq2){
 		list_peakCPeaksPos_Per_VP <- list()
 		list_peakCRegionsPos_Per_VP <- list()
-		if (replicates == TRUE){
+		if (replicates){
 			list_peakCMergePeaksPos_Per_VP <- list()
 			list_peakCMergeRegionsPos_Per_VP <- list()
 		}
@@ -1686,7 +1686,7 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 			}
 		}
 		
-		if (bins == TRUE | make.gwplot == TRUE){
+		if (bins | make.gwplot){
 			if (analysis[i] == "all"){
 				message("      >>> Creating bins <<<")	
 				if (configuration$binSize < 1e3){
@@ -1700,20 +1700,20 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 		}
 		
 		#6. make plot
-		if (make.cisplot == TRUE){
+		if (make.cisplot){
 			message("      >>> Creating local 4C Plot <<<")
 			createPlot(plotTitle=exp.name[i], vpPos=vppos[i], chromosome=CHR, fragGR=reads.cis, plotLegend=reportAnalysis, plotView=configuration$plotView,
 				maxY=configuration$maxY, minY=0, xaxisUnit=configuration$xaxisUnit, plotRegion='cis', foldOut=PLOT.F, plotType=configuration$plotType)
 		}
 
-		if (analysis[i]=="all" & make.gwplot == TRUE){
+		if (analysis[i]=="all" & make.gwplot){
 			message("      >>> Creating genome-wide 4C coverage Plot <<<")
 			createPlot(plotTitle=exp.name[i], vpPos=vppos[i], chromosome=CHR, fragGR=bin.GR, plotLegend=reportAnalysis, plotView=configuration$plotView,
 				maxY=configuration$maxY, minY=0, xaxisUnit=configuration$xaxisUnit, plotRegion='all', foldOut=GENOMEPLOT.F, plotType=configuration$plotType)
 		}
 
 		#Export data
-		if (make.bdg == TRUE){
+		if (make.bdg){
 			message("      >>> Creating bedGraph file <<<")
 
 			if (nonBlind){
@@ -1739,7 +1739,7 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 			}
 		}
 
-		if (make.wig == TRUE){
+		if (make.wig){
 			message("      >>> Creating WIG file <<<")
 
 			if (nonBlind){
@@ -1814,7 +1814,7 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 			}
 		}
 
-		if (tsv == TRUE){
+		if (tsv){
 			message("      >>> Creating TSV file <<<")
 
 			if (nonBlind){
@@ -1839,7 +1839,7 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 		}
 
 		# PeakC analysis
-		if (peakC == TRUE){
+		if (peakC){
 			message("      >>> PeakC analysis <<<")
 			bedFile = paste0(PEAKC.BED_BDG.F, exp.name[i], "_peakC_peaks.bed")
 			bedFileRegion = gsub("peakC_peaks", "peakC_regions", bedFile)
@@ -1918,7 +1918,7 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 				vpPos=VPpos, vpChr=VPChr, plotView=configuration$plotView, interval=TRUE)
 
 			#Preparing data to DESeq2 (recovery of all positive position per viewpoint)
-			if (DESeq2 == TRUE){
+			if (DESeq2){
 				VP <- paste0(CHR, ":", vppos[i])
 				if (is.null(list_peakCPeaksPos_Per_VP[[VP]]) == TRUE){
 					dataReads <- as.data.frame(readsPeakC.bdg)
@@ -1942,7 +1942,7 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 		message('\n')
 	}
 
-	if(replicates == TRUE){
+	if(replicates){
 		message("\n------ Replicate analysis")
 		message("      >>> Recovery replicates informations <<<")
 		
@@ -1956,7 +1956,11 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 				expname <- as.vector(to_process[[k]][[z]])
 				ViewP <- names(to_process[[k]][z])
 				mergeExpname <- paste0(k, "_viewpoint_chr", ViewP)
-				num_replicates <- VPinfo[which(VPinfo$expname == expname), colnames(VPinfo) == "replicate"]
+				num_replicates <- c()
+				for (o in expname) {
+					numTemp <- VPinfo[which(VPinfo$expname == o), colnames(VPinfo) == "replicate"]
+					num_replicates <- c(num_replicates, numTemp)
+				}				
 				msg <-":"
 				for (t in expname){
 					msg <- paste0(msg, " | ", t)
@@ -2032,33 +2036,33 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 					disabled <- 1
 				}
 
-				if (bins == TRUE | make.gwplot == TRUE & disabled == 0){
+				if (bins | make.gwplot & disabled == 0){
 					message("            *** Creating bins")	
 					if (configuration$binSize < 1e3){
-						file.out <- paste0(RDS.BIN.F, "merge_condition_", mergeExpname, "_bin_res_", configuration$binSize, "bp.rds")
+						file.out <- paste0(RDS.BIN.MERGE.F, "merge_condition_", mergeExpname, "_bin_res_", configuration$binSize, "bp.rds")
 					} else {
-						file.out <- paste0(RDS.BIN.F, "merge_condition_", mergeExpname, "_bin_res_", (configuration$binSize/1e3), "kb.rds")
+						file.out <- paste0(RDS.BIN.MERGE.F, "merge_condition_", mergeExpname, "_bin_res_", (configuration$binSize/1e3), "kb.rds")
 					}				
 					bin.GR <- doBins(file=file.out,  expname=mergeExpname, bin=configuration$binSize , reads=merge, assemblyName=unique(vpInfo$genome), 
 						config_genomes=configuration$genomes, report=reportAnalysis, vpInfo=vpInfo, log.path=log.path)
 				}
 
 				# Merge Plot
-				if (make.cisplot == TRUE){
+				if (make.cisplot){
 					message("            *** Creating local 4C Plot")
 					createPlot(plotTitle=mergeExpname, vpPos=unique(vpInfo$pos), chromosome=unique(vpInfo$chr), fragGR=merge[as.vector(seqnames(merge)) == unique(vpInfo$chr)], 
 						plotLegend=reportAnalysis, plotView=configuration$plotView,	maxY=configuration$maxY, minY=0, xaxisUnit=configuration$xaxisUnit, plotRegion='cis', 
 						foldOut=PLOT.MERGE.F, plotType=configuration$plotType)
 				}
 
-				if (disabled == 0 & make.gwplot == TRUE){
+				if (disabled == 0 & make.gwplot){
 					message("            *** Creating genome-wide 4C coverage Plot")
 					createPlot(plotTitle=mergeExpname, vpPos=unique(vpInfo$pos), chromosome=unique(vpInfo$chr), fragGR=bin.GR, plotLegend=reportAnalysis, plotView=configuration$plotView,
 						maxY=configuration$maxY, minY=0, xaxisUnit=configuration$xaxisUnit, plotRegion='all', foldOut=GENOMEPLOT.MERGE.F, plotType=configuration$plotType)
 				}
 
 				#Export data
-				if (make.bdg == TRUE){
+				if (make.bdg){
 					message("            *** Creating bedGraph file")
 
 					if (nonBlind){
@@ -2084,7 +2088,7 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 					}
 				}
 
-				if (make.wig == TRUE){
+				if (make.wig){
 					message("            *** Creating WIG file")
 
 					if (nonBlind){
@@ -2159,7 +2163,7 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 					}
 				}
 
-				if (tsv == TRUE){
+				if (tsv){
 					message("            *** Creating TSV file")
 
 					if (nonBlind){
@@ -2184,7 +2188,7 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 				}
 
 				# PeakC analysis
-				if (peakC == TRUE){
+				if (peakC){
 					message("            *** PeakC analysis")
 					mergeBedFile = paste0(PEAKC.BED_BDG.F, "merge_condition_", mergeExpname, "_peakC_peaks.bed")
 					mergeBedFileRegion = gsub("peakC_peaks", "peakC_regions", mergeBedFile)
@@ -2239,9 +2243,9 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 
 					#Export bed file
 					mergeBedPeaks <- exportPeakCPeaks(resPeakC=mergeResPeakC, bedFile=mergeBedFile, 
-						name=paste0("merge_condition_", mergeExpname,"peakC_peaks"), desc=NULL, includeVP=TRUE, min.gapwidth=0)
+						name=paste0("merge_condition_", mergeExpname, "_peakC_peaks"), desc=NULL, includeVP=TRUE, min.gapwidth=0)
 					mergeBedRegions <- exportPeakCPeaks(resPeakC=mergeResPeakC, bedFile=mergeBedFileRegion, 
-						name=paste0("merge_condition_", mergeExpname,"peakC_region"), desc=NULL, includeVP=TRUE, min.gapwidth=minGapwidth)
+						name=paste0("merge_condition_", mergeExpname, "_peakC_region"), desc=NULL, includeVP=TRUE, min.gapwidth=minGapwidth)
 
 					#export bedGraph
 					merge2 <- merge
@@ -2266,7 +2270,7 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 						vpPos=VPpos, vpChr=VPChr, plotView=configuration$plotView, interval=TRUE)
 
 					#Preparing data to DESeq2 (recovery of all positive position per viewpoint)
-					if (DESeq2 == TRUE){
+					if (DESeq2){
 						VP <- paste0("chr", gsub("-", ":", ViewP))
 						if (is.null(list_peakCMergePeaksPos_Per_VP[[VP]]) == TRUE){
 							dataReads <- as.data.frame(mergeReadsPeakC.bdg)
@@ -2285,7 +2289,7 @@ Run.4Cpipeline <- function(VPinfo.file, FASTQ.F, OUTPUT.F, configuration){
 							list_peakCMergeRegionsPos_Per_VP[[VP]] <- unique(c(list_peakCMergeRegionsPos_Per_VP[[VP]], dataRegionsReadsVP))
 						}
 					}
-					rm(peakCReads, mergeReadsPeakC.bdg, peakCRegions,mergeRegionPeakC.bdg)				
+					rm(peakCReads, mergeReadsPeakC.bdg, peakCRegions, mergeRegionPeakC.bdg)				
 				}
 			}
 		}
